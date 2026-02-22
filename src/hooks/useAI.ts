@@ -56,13 +56,13 @@ const KEYWORDS: Record<string, string[]> = {
 
 function detectIntent(message: string): string {
   const lowerMessage = message.toLowerCase();
-  
+
   for (const [intent, keywords] of Object.entries(KEYWORDS)) {
     if (keywords.some(keyword => lowerMessage.includes(keyword))) {
       return intent;
     }
   }
-  
+
   return 'default';
 }
 
@@ -77,22 +77,36 @@ export function useAI(): UseAIReturn {
 
   const generateResponse = useCallback(async (
     message: string,
-    _context?: string[]
+    context: string[] = []
   ): Promise<string> => {
     setIsProcessing(true);
     setError(null);
 
     try {
-      // Simulate AI processing delay
+      // 1. Try to call the Python Backend
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, context }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.response;
+      }
+
+      // 2. Fallback to local logic if backend fails
+      throw new Error('Backend unavailable');
+    } catch (err) {
+      console.warn('AI Backend not reachable, using local fallback...');
+
+      // Simulate AI processing delay for local fallback
       await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
 
       const intent = detectIntent(message);
       const response = getRandomResponse(intent);
 
       return response;
-    } catch (err: any) {
-      setError(err.message || 'Failed to generate response');
-      return 'Maaf, aku tidak mengerti. Bisa ulangi?';
     } finally {
       setIsProcessing(false);
     }
@@ -134,7 +148,7 @@ export function useAI(): UseAIReturn {
       const negativeWords = ['sedih', 'marah', 'kecewa', 'buruk', 'jelek', 'sakit', 'sad', 'angry', 'bad', 'hate', '😢', '😠', '😞', '💔'];
 
       const lowerText = text.toLowerCase();
-      
+
       let positiveScore = 0;
       let negativeScore = 0;
 

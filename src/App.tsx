@@ -183,7 +183,7 @@ function App() {
 
       {/* Main Panel */}
       {showMain && (
-        <div className={`${isMobile ? 'w-full' : 'flex-1'} h-full overflow-hidden`}>
+        <div className={`${isMobile ? 'w-full animate-slide-in' : 'flex-1'} h-full overflow-hidden relative`}>
           {showProfile && (
             <ProfilePage
               userId={user.id}

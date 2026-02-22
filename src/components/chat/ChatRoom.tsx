@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone, Video, MoreVertical, Send, Mic, Play, Pause,
-  ChevronLeft, Sparkles, Lock, SmilePlus, Reply, CheckCheck, X, Users, Paperclip,
+  ChevronLeft, Sparkles, Lock, SmilePlus, Reply, CheckCheck, X, Users, Paperclip, Plus,
   Ghost, Image as ImageIcon, Trash2, Clock, BarChart2, MapPin, ExternalLink
 } from 'lucide-react';
 import {
@@ -366,17 +366,34 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          <Button variant="ghost" size="icon" onClick={() => { setCallType('voice'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-500">
-            <Phone className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={() => { setCallType('video'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-500">
-            <Video className="h-4 w-4" />
-          </Button>
+
+          {/* On Desktop: Show call icons directly. On Mobile: Hide them if space is low or group them */}
+          {!isMobile && (
+            <>
+              <Button variant="ghost" size="icon" onClick={() => { setCallType('voice'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-500">
+                <Phone className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => { setCallType('video'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-500">
+                <Video className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {isMobile && (
+                <>
+                  <DropdownMenuItem onClick={() => { setCallType('voice'); setShowCallModal(true); }}>
+                    <Phone className="w-4 h-4 mr-2" /> Telepon Suara
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setCallType('video'); setShowCallModal(true); }}>
+                    <Video className="w-4 h-4 mr-2" /> Video Call
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuItem onClick={() => {
                 const url = prompt('Masukkan URL gambar wallpaper (atau biarkan kosong untuk default):');
                 if (url !== null) {
@@ -648,19 +665,46 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className={`shrink-0 w-10 h-10 rounded-full transition-colors ${showEmojiPicker ? 'text-pink-500 bg-pink-50 dark:bg-pink-900/20' : 'text-gray-400 hover:text-pink-500'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-              <SmilePlus className="w-5 h-5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={() => setShowPollModal(true)}>
-              <BarChart2 className="w-5 h-5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={handleShareLocation}>
-              <MapPin className="w-5 h-5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={() => fileInputRef.current?.click()}>
-              <Paperclip className="w-5 h-5" />
-            </Button>
+          <div className="flex items-center gap-1 sm:gap-2">
+            {!isMobile ? (
+              <>
+                <Button variant="ghost" size="icon" className={`shrink-0 w-10 h-10 rounded-full transition-colors ${showEmojiPicker ? 'text-pink-500 bg-pink-50 dark:bg-pink-900/20' : 'text-gray-400 hover:text-pink-500'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+                  <SmilePlus className="w-5 h-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={() => setShowPollModal(true)}>
+                  <BarChart2 className="w-5 h-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={handleShareLocation}>
+                  <MapPin className="w-5 h-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={() => fileInputRef.current?.click()}>
+                  <Paperclip className="w-5 h-5" />
+                </Button>
+              </>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500">
+                    <Plus className="w-5 h-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="mb-2">
+                  <DropdownMenuItem onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+                    <SmilePlus className="w-4 h-4 mr-2" /> Emoji
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+                    <Paperclip className="w-4 h-4 mr-2" /> Media/File
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowPollModal(true)}>
+                    <BarChart2 className="w-4 h-4 mr-2" /> Polling
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleShareLocation}>
+                    <MapPin className="w-4 h-4 mr-2" /> Lokasi
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
             <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleFileSelect} />
             <div className="flex-1 relative group">
               <Input
@@ -669,7 +713,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                 value={newMessage}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                className={`w-full rounded-2xl bg-gray-100 dark:bg-gray-800 border-none px-4 py-2.5 focus:ring-2 transition-all ${vanishMode ? 'focus:ring-pink-500/30' : 'focus:ring-pink-500/20'}`}
+                className={`w-full rounded-2xl bg-gray-100 dark:bg-gray-800 border-none px-4 py-2.5 focus:ring-2 transition-all text-sm ${vanishMode ? 'focus:ring-pink-500/30' : 'focus:ring-pink-500/20'}`}
               />
               {vanishMode && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">

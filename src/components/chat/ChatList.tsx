@@ -188,11 +188,11 @@ export function ChatList({
                 {getInitials(userDisplayName || userEmail)}
               </AvatarFallback>
             </Avatar>
-            <div className="text-left">
-              <p className="font-semibold text-sm truncate max-w-[120px]">
+            <div className="text-left min-w-0 flex-1">
+              <p className="font-semibold text-sm truncate">
                 {userDisplayName || userEmail.split('@')[0]}
               </p>
-              <p className="text-xs text-green-500 font-semibold">● Online</p>
+              <p className="text-[10px] text-green-500 font-bold uppercase tracking-tight">● Online</p>
             </div>
           </button>
           <div className="flex items-center gap-1">
@@ -244,9 +244,9 @@ export function ChatList({
           <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center shrink-0">
             <Bot className="w-4 h-4 text-white" />
           </div>
-          <div className="text-left">
-            <p className="font-medium text-sm">LoveBot AI</p>
-            <p className="text-xs text-muted-foreground">Asisten romantis kamu</p>
+          <div className="text-left flex-1 min-w-0">
+            <p className="font-bold text-sm bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">LoveBot AI</p>
+            <p className="text-[10px] text-muted-foreground truncate font-medium uppercase tracking-tight">Asisten romantis cerdas</p>
           </div>
         </Button>
       </div>
