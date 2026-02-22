@@ -83,8 +83,8 @@ export function useAI(): UseAIReturn {
     setError(null);
 
     try {
-      // 1. Try to call the Python Backend
-      const response = await fetch('http://localhost:8000/chat', {
+      // 1. Try to call the Python Backend (Relative URL for Vercel)
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, context }),
