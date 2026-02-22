@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Heart, Loader2, Mail, Lock, User } from 'lucide-react';
+import { Loader2, Mail, Lock, User } from 'lucide-react';
 import { signUp, createProfile } from '@/lib/supabase';
 import { generateKeyPair, exportPublicKey } from '@/lib/encryption';
 
@@ -41,7 +41,7 @@ export function SignupForm({ onSuccess, onToggleMode }: SignupFormProps) {
     try {
       // Sign up user
       const { data, error: signUpError } = await signUp(email, password);
-      
+
       if (signUpError) {
         throw signUpError;
       }
@@ -59,7 +59,7 @@ export function SignupForm({ onSuccess, onToggleMode }: SignupFormProps) {
 
         // Create profile
         const { error: profileError } = await createProfile(data.user.id, email, publicKeyStr);
-        
+
         if (profileError) {
           console.error('Error creating profile:', profileError);
         }
@@ -78,20 +78,31 @@ export function SignupForm({ onSuccess, onToggleMode }: SignupFormProps) {
 
   if (success) {
     return (
-      <Card className="w-full max-w-md border-green-200 dark:border-green-800">
+      <Card className="w-full max-w-md border-pink-200 dark:border-pink-800">
         <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-emerald-500 rounded-full flex items-center justify-center">
-              <Heart className="w-8 h-8 text-white" />
+            <div className="w-16 h-16 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center animate-bounce">
+              <Mail className="w-8 h-8 text-white" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold text-green-600">
-            Pendaftaran Berhasil!
+          <CardTitle className="text-2xl font-bold bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent">
+            Cek Email Kamu! 📩
           </CardTitle>
-          <CardDescription>
-            Akunmu sudah dibuat. Sedang mengalihkan...
+          <CardDescription className="text-base font-medium">
+            Link konfirmasi telah dikirim ke <span className="text-pink-500 font-bold">{email}</span>.
+            <br /><br />
+            Silakan klik link tersebut untuk mengaktifkan akun LoveChat kamu. Setelah itu, kamu bisa login kembali di sini.
           </CardDescription>
         </CardHeader>
+        <CardContent className="text-center">
+          <Button
+            variant="outline"
+            className="w-full rounded-full border-pink-200 hover:bg-pink-50"
+            onClick={onToggleMode}
+          >
+            Kembali ke Login
+          </Button>
+        </CardContent>
       </Card>
     );
   }
@@ -118,7 +129,7 @@ export function SignupForm({ onSuccess, onToggleMode }: SignupFormProps) {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
-          
+
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <div className="relative">
