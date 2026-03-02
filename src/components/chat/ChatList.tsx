@@ -203,14 +203,14 @@ export function ChatList({
 
   const getChatName = (chat: Chat) => {
     if (chat.is_group) return chat.name || 'Grup Tanpa Nama';
-    const otherParticipant = chat.participants?.find(p => p.id !== userId);
-    return otherParticipant?.display_name || otherParticipant?.email?.split('@')[0] || 'Unknown';
+    const otherParticipant = chat.participants?.find(p => p.user_id !== userId);
+    return otherParticipant?.profile?.display_name || otherParticipant?.profile?.email?.split('@')[0] || 'Unknown';
   };
 
   const getChatAvatar = (chat: Chat) => {
     if (chat.is_group) return chat.avatar_url;
-    const otherParticipant = chat.participants?.find(p => p.id !== userId);
-    return otherParticipant?.avatar_url;
+    const otherParticipant = chat.participants?.find(p => p.user_id !== userId);
+    return otherParticipant?.profile?.avatar_url;
   };
 
   const getInitials = (name: string) => {

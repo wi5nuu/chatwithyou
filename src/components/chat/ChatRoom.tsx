@@ -12,12 +12,12 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { getMessages, sendMessage, getOtherParticipant, uploadImage, uploadVideo, createPoll, markMessagesAsRead, supabase } from '@/lib/supabase';
-import { useRealtimeMessages, useTypingIndicator } from '@/hooks/useRealtime';
+import { useRealtimeMessages, useTypingIndicator, useRealtimeProfile } from '@/hooks/useRealtime';
 import { useVoiceRecorder, useVoicePlayer } from '@/hooks/useVoiceRecorder';
 import { useAI } from '@/hooks/useAI';
 import { encryptMessage, decryptMessage, deriveSharedSecret, importPrivateKey, importPublicKey } from '@/lib/encryption';
 import { toast } from 'sonner';
-import type { Chat, Message } from '@/types';
+import type { Chat, Message, Profile } from '@/types';
 import { CallModal } from '../call/CallModal';
 import { CreatePollModal } from './CreatePollModal';
 import { PollMessage } from './PollMessage';
@@ -66,11 +66,23 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const { suggestReply } = useAI();
 
   useEffect(() => {
+    // Immediate sync from chat prop if available
+    if (!chat.is_group && chat.participants) {
+      const pArray = chat.participants as any[];
+      const other = pArray.find((p: any) => p.user_id !== userId);
+      if (other?.profile) setOtherUser(other.profile);
+    }
     setCurrentResetAt(chat.reset_at || null);
     initializeChat();
   }, [chat.id, userId]);
+
   useRealtimeMessages(chat.id, (msg) => decryptAndAddMessage(msg), (updatedMsg) => {
     setMessages((prev: Message[]) => prev.map(m => m.id === updatedMsg.id ? { ...m, is_read: updatedMsg.is_read } : m));
+  });
+
+  // Keep other user's online status and profile info in sync
+  useRealtimeProfile(otherUser?.id || null, (updatedProfile) => {
+    setOtherUser((prev: Profile | null) => prev ? { ...prev, ...updatedProfile } : updatedProfile);
   });
 
   useEffect(() => {

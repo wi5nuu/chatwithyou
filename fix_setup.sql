@@ -5,8 +5,17 @@
 CREATE POLICY "Users can create chats" ON public.chats FOR INSERT WITH CHECK (auth.uid() = created_by OR created_by IS NULL);
 
 -- 2. FIX: Policy untuk CHAT PARTICIPANTS (Agar bisa melihat dan menambah peserta)
-CREATE POLICY "Users can view participants of their chats" ON public.chat_participants FOR SELECT 
-  USING (EXISTS (SELECT 1 FROM public.chat_participants WHERE chat_id = public.chat_participants.chat_id AND user_id = auth.uid()));
+-- Menggunakan subquery sederhana pada tabel chats untuk menghindari rekursi pada tabel yang sama
+CREATE POLICY "Users can view all participants of chats they belong to" 
+ON public.chat_participants FOR SELECT 
+USING (
+  chat_id IN (
+    SELECT id FROM public.chats
+  )
+);
+
+-- Note: Karena public.chats sudah punya policy SELECT yang memfilter berdasarkan keanggotaan,
+-- policy di atas akan secara otomatis membatasi akses ke participant chat yang valid saja.
 CREATE POLICY "Users can add participants" ON public.chat_participants FOR INSERT WITH CHECK (true);
 
 -- 3. FIX: Policy untuk CALLS & CANDIDATES (Penting untuk sistem Telepon/WebRTC)

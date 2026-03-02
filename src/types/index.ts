@@ -21,7 +21,7 @@ export interface Chat {
   name?: string | null;
   avatar_url?: string | null;
   created_by?: string | null;
-  participants?: Profile[];
+  participants?: ChatParticipant[];
   last_message?: Message;
   unread_count?: number;
 }
