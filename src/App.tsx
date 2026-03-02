@@ -6,7 +6,10 @@ import { ChatList } from '@/components/chat/ChatList';
 import { ChatRoom } from '@/components/chat/ChatRoom';
 import { AIChat } from '@/components/chat/AIChat';
 import { ProfilePage } from '@/components/profile/ProfilePage';
+import { Toaster } from '@/components/ui/sonner';
+import { toast } from 'sonner';
 import { LandingPage } from '@/components/landing/LandingPage';
+import { CallModal } from '@/components/call/CallModal';
 import { getCurrentUser, supabase, getProfile } from '@/lib/supabase';
 import { useOnlineStatus } from '@/hooks/useRealtime';
 import type { Chat, Profile } from '@/types';
@@ -23,6 +26,8 @@ function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [activeCall, setActiveCall] = useState<any>(null);
+  const [callerProfile, setCallerProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('lovechat_darkmode');
@@ -55,6 +60,46 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+
+    // Listen for incoming calls
+    const channel = supabase
+      .channel(`global-calls:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'calls',
+        },
+        async (payload) => {
+          const call = payload.new;
+          if (call.caller_id !== user.id && call.status === 'ringing') {
+            // Check if user is a participant in this chat
+            const { data: participants } = await supabase
+              .from('chat_participants')
+              .select('user_id')
+              .eq('chat_id', call.chat_id);
+
+            if (participants?.some(p => p.user_id === user.id)) {
+              // Get caller profile
+              const { data: profileData } = await getProfile(call.caller_id);
+              if (profileData) {
+                setCallerProfile(profileData as Profile);
+                setActiveCall(call);
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   useOnlineStatus(user?.id);
 
   const checkAuth = async () => {
@@ -64,8 +109,9 @@ function App() {
         setUser(currentUser);
         await loadUserProfile(currentUser.id);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Auth check error:', error);
+      toast.error('Gagal memverifikasi sesi. Silakan masuk kembali.');
     } finally {
       setIsLoading(false);
     }
@@ -106,12 +152,25 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-rose-50 dark:from-gray-900 dark:to-gray-800">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-            <Heart className="w-8 h-8 text-white" />
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-gray-950 overflow-hidden relative">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[50vw] h-[50vw] bg-pink-500/5 rounded-full blur-[120px] animate-pulse" />
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-rose-500 to-pink-600 rounded-3xl flex items-center justify-center shadow-2xl animate-bounce-slow mb-8">
+            <Heart className="w-10 h-10 text-white fill-white/20" />
           </div>
-          <p className="text-muted-foreground">Memuat...</p>
+          <div className="space-y-3 text-center">
+            <h2 className="text-2xl font-black bg-gradient-to-r from-rose-500 to-pink-600 bg-clip-text text-transparent uppercase tracking-tighter">
+              LoveChat
+            </h2>
+            <div className="flex items-center justify-center gap-1.5">
+              <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-bounce" style={{ animationDuration: '0.6s' }} />
+              <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s', animationDuration: '0.6s' }} />
+              <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s', animationDuration: '0.6s' }} />
+            </div>
+            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest opacity-40 mt-4">
+              Securing your connections
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -162,7 +221,7 @@ function App() {
   const showMain = !isMobile || selectedChat || showAIChat || showProfile;
 
   return (
-    <div className="h-screen flex bg-gray-50 dark:bg-gray-950">
+    <main className="h-screen flex bg-gray-50 dark:bg-gray-950">
       {/* Sidebar - Chat List */}
       {showSidebar && (
         <div className={`${isMobile ? 'w-full' : 'w-80'} h-full shrink-0`}>
@@ -229,7 +288,23 @@ function App() {
           )}
         </div>
       )}
-    </div>
+      {/* Global Call Overlay */}
+      {activeCall && callerProfile && (
+        <CallModal
+          chatId={activeCall.chat_id}
+          userId={user!.id}
+          isIncoming={true}
+          incomingCall={activeCall}
+          otherUser={callerProfile}
+          callType={activeCall.type}
+          onClose={() => {
+            setActiveCall(null);
+            setCallerProfile(null);
+          }}
+        />
+      )}
+      <Toaster position="top-center" richColors />
+    </main>
   );
 }
 

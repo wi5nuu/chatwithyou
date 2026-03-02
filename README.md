@@ -1,58 +1,60 @@
-# 💖 LoveChat - Secure & Premium Messaging
+# 💖 LoveChat: The Gold Standard for Private Messaging
 
-LoveChat adalah aplikasi messaging modern yang mengutamakan privasi tinggi dan pengalaman pengguna (UX) yang premium. Dibangun dengan fokus pada keamanan **End-to-End Encryption (E2EE)** dan fitur-fitur interaktif canggih.
+LoveChat is a luxury, high-security messaging platform designed for those who value absolute privacy and a premium user experience. Built with a "Privacy First" philosophy, it combines state-of-the-art Web WebCrypto E2E encryption with a stunning, modern interface.
 
-## ✨ Fitur Utama
+![LoveChat Preview](https://images.unsplash.com/photo-1516321318423-f06f85e504b3?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80)
 
-### 🛡️ Keamanan & Privasi
-- **Full E2EE**: Pesan dienknipsi di perangkat menggunakan **ECDH (P-256)** dan **AES-GCM (256-bit)**. Server tidak bisa membaca isi pesan Anda.
-- **👻 Vanish Mode**: Kirim pesan rahasia yang akan menghilang otomatis dalam 1 menit atau 1 jam.
-- **🔒 Secure Media**: Foto, video, dan pesan suara semuanya dienkripsi sebelum diunggah.
+## ✨ Premium Features
 
-### 🚀 Fitur Chat Modern
-- **📊 Interactive Polls**: Buat polling langsung di grup atau private chat dengan hasil real-time.
-- **📍 Share Location**: Kirim pin lokasi Anda dengan preview Google Maps yang rapi.
-- **🔵 Read Receipts**: Indikator centang pink instan saat pesan sudah dibaca.
-- **🔗 Link Previews**: Deteksi otomatis dan preview visual untuk link website.
-- **🖼️ Custom Wallpapers**: Personalisasi latar belakang setiap room chat sesuai keinginan.
-- **🎤 Voice Messages**: Rekam dan dengarkan pesan suara dengan visualizer progres.
+### 🛡️ Unrivaled Security
+- **End-to-End Encryption (E2EE)**: Powered by **ECDH (P-256)** for key exchange and **AES-GCM (256-bit)** for message confidentiality.
+- **Zero-Knowledge Architecture**: Your keys never leave your device. Not even the LoveChat servers can read your meaningful conversations.
+- **Secure Media Pipeline**: Photos, videos, and voice notes are encrypted locally before being stored in Supabase Storage.
 
-### 🤖 AI Integration
-- **✨ Smart Suggestions**: Dapatkan saran balasan otomatis yang cerdas sesuai konteks percakapan untuk membalas lebih cepat.
+### 🎨 Human-Centric Design
+- **Interactive Multimedia**: Seamlessly share images, high-definition videos, and location pins.
+- **Vanish Mode**: Send messages that automatically self-destruct after being read.
+- **Modern Polls**: Native polling with real-time visual results for group decision making.
+- **LoveBot AI Assistant**: Integrated Gemini-powered AI that provides romantic suggestions and relationship tips.
 
-## 🛠️ Stack Teknologi
-- **Frontend**: React 18, Vite, TypeScript
-- **Backend / BaaS**: Supabase (Auth, PostgreSQL, Storage, Realtime)
-- **Styling**: Tailwind CSS
-- **Icons**: Lucide React
-- **Security**: Web Crypto API
+### 📞 Robust Communication
+- **Global VoIP**: High-quality voice and video calls with real-time notifications across the entire app.
+- **WebRTC Optimization**: Advanced ICE candidate exchange ensures stable connections across various network configurations.
 
-## 🚀 Persiapan & Instalasi
+## 🛠️ Technology Stack
 
-1. **Clone Repository**:
-   ```bash
-   git clone https://github.com/username/lovechat.git
-   cd lovechat
-   ```
+- **Frontend Core**: React 18 + Vite + TypeScript (Type-safe throughout)
+- **Styling Engine**: Tailwind CSS with custom Glassmorphism & Luxury shadows
+- **Backend Infrastructure**: Supabase (PostgreSQL, Realtime, Auth, Storage)
+- **Security**: SubtleCrypto (Web Crypto API)
 
-2. **Install Dependensi**:
-   ```bash
-   npm install
-   ```
+## 🚀 Professional Deployment Guide
 
-3. **Konfigurasi Environment**:
-   Buat file `.env` di root direktori:
-   ```env
-   VITE_SUPABASE_URL=your_supabase_url
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-   ```
+### 1. Database Initialization
+This project includes a comprehensive `setup.sql` script.
+- Log in to your [Supabase Dashboard](https://supabase.com).
+- Open the **SQL Editor**.
+- Copy the contents of [`setup.sql`](./setup.sql) and execute it. This will create all tables, RLS policies, and triggers automatically.
 
-4. **Jalankan Aplikasi**:
-   ```bash
-   npm run dev
-   ```
+### 2. Local Setup
+```bash
+# Clone the repository
+git clone https://github.com/your-org/lovechat.git
+cd lovechat
+
+# Install dependencies
+npm install
+
+# Configure environments (.env)
+cp .env.example .env
+# Fill in your VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+```
+
+### 3. Start Development
+```bash
+npm run dev
+```
 
 ---
 
-Dibuat dengan ❤️ untuk komunikasi yang lebih aman dan menyenangkan.
-
+*Handcrafted with ❤️ for those who believe that privacy is a fundamental human right.*

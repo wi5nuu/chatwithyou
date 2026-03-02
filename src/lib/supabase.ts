@@ -133,6 +133,7 @@ export const getUserChats = async (userId: string) => {
       chats:chat_id (
         id,
         created_at,
+        reset_at,
         is_group,
         name,
         avatar_url,
@@ -176,12 +177,17 @@ export const createGroupChat = async (name: string, participantIds: string[], cr
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
-export const getMessages = async (chatId: string) => {
-  const { data, error } = await supabase
+export const getMessages = async (chatId: string, resetAt?: string | null) => {
+  let query = supabase
     .from('messages')
     .select(`*, sender:sender_id (id, email, display_name, avatar_url, public_key, online, last_seen)`)
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: true });
+    .eq('chat_id', chatId);
+
+  if (resetAt) {
+    query = query.gt('created_at', resetAt);
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: true });
   return { data, error };
 };
 
@@ -406,4 +412,58 @@ export const subscribeToProfile = (userId: string, callback: (payload: any) => v
     .channel(`profiles:${userId}`)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` }, callback)
     .subscribe();
+};
+
+// ─── Friendships ─────────────────────────────────────────────────────────────
+
+export const sendFriendRequest = async (senderId: string, receiverId: string) => {
+  const { data, error } = await (supabase as any)
+    .from('friendships')
+    .insert({ sender_id: senderId, receiver_id: receiverId, status: 'pending' })
+    .select()
+    .single();
+  return { data, error };
+};
+
+export const getFriends = async (userId: string) => {
+  const { data, error } = await (supabase as any)
+    .from('friendships')
+    .select(`
+      *,
+      sender:sender_id (id, email, display_name, avatar_url, online, last_seen),
+      receiver:receiver_id (id, email, display_name, avatar_url, online, last_seen)
+    `)
+    .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+    .eq('status', 'accepted');
+  return { data, error };
+};
+
+export const getPendingRequests = async (userId: string) => {
+  const { data, error } = await (supabase as any)
+    .from('friendships')
+    .select(`
+      *,
+      sender:sender_id (id, email, display_name, avatar_url, online, last_seen)
+    `)
+    .eq('receiver_id', userId)
+    .eq('status', 'pending');
+  return { data, error };
+};
+
+export const respondToFriendRequest = async (requestId: string, status: 'accepted' | 'declined') => {
+  const { data, error } = await (supabase as any)
+    .from('friendships')
+    .update({ status })
+    .eq('id', requestId)
+    .select()
+    .single();
+  return { data, error };
+};
+
+export const removeFriend = async (friendshipId: string) => {
+  const { error } = await (supabase as any)
+    .from('friendships')
+    .delete()
+    .eq('id', friendshipId);
+  return { error };
 };

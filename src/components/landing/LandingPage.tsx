@@ -16,14 +16,20 @@ interface LandingPageProps {
 export function LandingPage({ onStartChat }: LandingPageProps) {
     const [isScrolled, setIsScrolled] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [showScrollTop, setShowScrollTop] = useState(false);
 
     useEffect(() => {
         const handleScroll = () => {
             setIsScrolled(window.scrollY > 50);
+            setShowScrollTop(window.scrollY > 500);
         };
         window.addEventListener('scroll', handleScroll);
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
+
+    const scrollToTop = () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
 
     const navLinks = [
         { href: '#features', label: 'Fitur' },
@@ -105,6 +111,17 @@ export function LandingPage({ onStartChat }: LandingPageProps) {
             </main>
 
             <Footer onStartChat={onStartChat} />
+
+            {/* Scroll to Top Button */}
+            <button
+                onClick={scrollToTop}
+                className={`fixed bottom-8 right-8 z-50 p-3 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-2xl transition-all duration-500 hover:scale-110 active:scale-95 group ${showScrollTop ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'
+                    }`}
+                aria-label="Scroll to top"
+            >
+                <div className="absolute inset-0 bg-gradient-to-br from-pink-500 to-rose-500 opacity-0 group-hover:opacity-10 rounded-2xl transition-opacity animate-pulse" />
+                <Heart className="w-6 h-6 text-pink-500 fill-transparent group-hover:fill-pink-500 transition-all" />
+            </button>
         </div>
     );
 }

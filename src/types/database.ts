@@ -48,14 +48,17 @@ export interface Database {
         Row: {
           id: string
           created_at: string
+          reset_at: string | null
         }
         Insert: {
           id?: string
           created_at?: string
+          reset_at?: string | null
         }
         Update: {
           id?: string
           created_at?: string
+          reset_at?: string | null
         }
         Relationships: []
       }
@@ -133,6 +136,80 @@ export interface Database {
             columns: ["sender_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      friendships: {
+        Row: {
+          id: string
+          sender_id: string
+          receiver_id: string
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          sender_id: string
+          receiver_id: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          sender_id?: string
+          receiver_id?: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "friendships_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "friendships_receiver_id_fkey"
+            columns: ["receiver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      call_candidates: {
+        Row: {
+          id: string
+          call_id: string
+          user_id: string
+          candidate: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          call_id: string
+          user_id: string
+          candidate: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          call_id?: string
+          user_id?: string
+          candidate?: Json
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_candidates_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
             referencedColumns: ["id"]
           }
         ]

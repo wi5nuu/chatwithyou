@@ -6,16 +6,17 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone, Video, MoreVertical, Send, Mic, Play, Pause,
   ChevronLeft, Sparkles, Lock, SmilePlus, Reply, CheckCheck, X, Users, Paperclip, Plus,
-  Ghost, Image as ImageIcon, Trash2, Clock, BarChart2, MapPin, ExternalLink
+  Ghost, Image as ImageIcon, Trash2, BarChart2, MapPin, ExternalLink
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getMessages, sendMessage, getOtherParticipant, uploadImage, uploadVideo, createPoll, markMessagesAsRead } from '@/lib/supabase';
+import { getMessages, sendMessage, getOtherParticipant, uploadImage, uploadVideo, createPoll, markMessagesAsRead, supabase } from '@/lib/supabase';
 import { useRealtimeMessages, useTypingIndicator } from '@/hooks/useRealtime';
 import { useVoiceRecorder, useVoicePlayer } from '@/hooks/useVoiceRecorder';
 import { useAI } from '@/hooks/useAI';
 import { encryptMessage, decryptMessage, deriveSharedSecret, importPrivateKey, importPublicKey } from '@/lib/encryption';
+import { toast } from 'sonner';
 import type { Chat, Message } from '@/types';
 import { CallModal } from '../call/CallModal';
 import { CreatePollModal } from './CreatePollModal';
@@ -53,6 +54,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const [wallpaper, setWallpaper] = useState<string | null>(null);
   const [showPollModal, setShowPollModal] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [currentResetAt, setCurrentResetAt] = useState<string | null>(chat.reset_at || null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,7 +65,10 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const { sendTyping } = useTypingIndicator(chat.id, userId, (_, typing) => setIsTyping(typing));
   const { suggestReply } = useAI();
 
-  useEffect(() => { initializeChat(); }, [chat.id, userId]);
+  useEffect(() => {
+    setCurrentResetAt(chat.reset_at || null);
+    initializeChat();
+  }, [chat.id, userId]);
   useRealtimeMessages(chat.id, (msg) => decryptAndAddMessage(msg), (updatedMsg) => {
     setMessages((prev: Message[]) => prev.map(m => m.id === updatedMsg.id ? { ...m, is_read: updatedMsg.is_read } : m));
   });
@@ -99,6 +104,18 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       setMessages([]);
       setSharedSecret(null);
 
+      // Weekly Reset Check
+      const lastReset = currentResetAt ? new Date(currentResetAt) : new Date(chat.created_at);
+      const now = new Date();
+      const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+      let effectiveResetAt = currentResetAt;
+
+      if (now.getTime() - lastReset.getTime() > oneWeekInMs) {
+        effectiveResetAt = now.toISOString();
+        await supabase.from('chats').update({ reset_at: effectiveResetAt }).eq('id', chat.id);
+        setCurrentResetAt(effectiveResetAt);
+      }
+
       // Helper: decode fallback (base64) messages
       const decodeFallback = (ciphertext: string) => {
         try { return decodeURIComponent(escape(atob(ciphertext))); } catch { return ciphertext; }
@@ -114,7 +131,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
             const publicKey = await importPublicKey(participantData.profile.public_key);
             const secret = await deriveSharedSecret(privateKey, publicKey);
             setSharedSecret(secret);
-            const { data: messagesData } = (await getMessages(chat.id)) as any;
+            const { data: messagesData } = (await getMessages(chat.id, effectiveResetAt)) as any;
             if (messagesData) {
               const decrypted = await Promise.all(messagesData.map(async (msg: any) => {
                 if (msg.iv === 'plain' || !msg.ciphertext) {
@@ -129,21 +146,21 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
             }
           } catch {
             // Key derivation failed — load as fallback
-            const { data: messagesData } = (await getMessages(chat.id)) as any;
+            const { data: messagesData } = (await getMessages(chat.id, effectiveResetAt)) as any;
             if (messagesData) setMessages(messagesData.map((msg: any) => ({
               ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : ''
             })) as Message[]);
           }
         } else {
           // No public key — load messages with fallback decoding
-          const { data: messagesData } = (await getMessages(chat.id)) as any;
+          const { data: messagesData } = (await getMessages(chat.id, effectiveResetAt)) as any;
           if (messagesData) setMessages(messagesData.map((msg: any) => ({
             ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : ''
           })) as Message[]);
         }
       } else {
         // Group chat — decode fallback messages
-        const { data: messagesData } = (await getMessages(chat.id)) as any;
+        const { data: messagesData } = (await getMessages(chat.id, effectiveResetAt)) as any;
         if (messagesData) setMessages(messagesData.map((msg: any) => ({
           ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : ''
         })) as Message[]);
@@ -211,10 +228,16 @@ ${newMessage.trim()}`
   };
 
   const handleSendVoice = async () => {
-    if (!audioBase64 || !sharedSecret) return;
+    if (!audioBase64) return;
     try {
-      const encrypted = await encryptMessage(sharedSecret, audioBase64);
-      const { data } = await sendMessage({ chat_id: chat.id, sender_id: userId, type: 'voice', ...encrypted });
+      let payload: any;
+      if (sharedSecret) {
+        const encrypted = await encryptMessage(sharedSecret, audioBase64);
+        payload = { chat_id: chat.id, sender_id: userId, type: 'voice', ...encrypted };
+      } else {
+        payload = { chat_id: chat.id, sender_id: userId, type: 'voice', ciphertext: encodeFallback(audioBase64), iv: 'plain' };
+      }
+      const { data } = await sendMessage(payload);
       if (data) setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: audioBase64 } as Message]);
     } catch (error) { console.error('Voice error:', error); }
   };
@@ -243,6 +266,8 @@ ${newMessage.trim()}`
       const placeholder = publicUrl;
       // If sharedSecret exists, encrypt the URL so it's stored securely
       let messagePayload: any;
+      const expires_at = vanishMode ? new Date(Date.now() + vanishTimer * 1000).toISOString() : null;
+
       if (sharedSecret) {
         const encrypted = await encryptMessage(sharedSecret, placeholder);
         messagePayload = {
@@ -250,14 +275,16 @@ ${newMessage.trim()}`
           sender_id: userId,
           type: isVideo ? 'video' : 'image',
           ...encrypted,
-          expires_at: vanishMode ? new Date(Date.now() + vanishTimer * 1000).toISOString() : null
+          expires_at
         };
       } else {
         messagePayload = {
           chat_id: chat.id,
           sender_id: userId,
           type: isVideo ? 'video' : 'image',
-          decrypted_content: placeholder
+          ciphertext: placeholder, // Store URL in ciphertext
+          iv: 'plain',
+          expires_at
         };
       }
 
@@ -268,36 +295,62 @@ ${newMessage.trim()}`
     } catch (error) { console.error('Media send error:', error); }
     finally {
       setIsUploadingMedia(false);
-      setImagePreview(null);
-      URL.revokeObjectURL(imagePreview.url);
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview.url);
+        setImagePreview(null);
+      }
     }
   };
 
   const handleShareLocation = async () => {
-    if (!navigator.geolocation || !sharedSecret) return;
+    if (!navigator.geolocation) return;
 
     navigator.geolocation.getCurrentPosition(async (position) => {
       const { latitude, longitude } = position.coords;
       const locationData = { lat: latitude, lng: longitude };
       const placeholder = `https://www.google.com/maps?q=${latitude},${longitude}`;
+      const expires_at = vanishMode ? new Date(Date.now() + vanishTimer * 1000).toISOString() : null;
 
       try {
-        const encrypted = await encryptMessage(sharedSecret, placeholder);
-        const { data } = await sendMessage({
-          chat_id: chat.id,
-          sender_id: userId,
-          type: 'location',
-          ...encrypted,
-          location: locationData,
-          expires_at: vanishMode ? new Date(Date.now() + vanishTimer * 1000).toISOString() : null
-        } as any);
+        let messagePayload: any;
+        if (sharedSecret) {
+          const encrypted = await encryptMessage(sharedSecret, placeholder);
+          messagePayload = {
+            chat_id: chat.id,
+            sender_id: userId,
+            type: 'location',
+            ...encrypted,
+            location: locationData,
+            expires_at
+          };
+        } else {
+          messagePayload = {
+            chat_id: chat.id,
+            sender_id: userId,
+            type: 'location',
+            ciphertext: encodeFallback(placeholder),
+            iv: 'plain',
+            location: locationData,
+            expires_at
+          };
+        }
+
+        const { data } = await sendMessage(messagePayload);
 
         if (data) {
           setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: placeholder, location: locationData } as Message]);
         }
-      } catch (error) {
-        console.error('Location share error:', error);
-      }
+      } catch (error: any) {
+        console.error('Error sending message:', error);
+        toast.error('Gagal mengirim pesan: ' + (error.message || 'Unknown error'));
+        setSendError(error.message);
+      } finally { /* This finally block is empty and seems misplaced based on the original structure.
+                  * The original structure had the geolocation error handler as the second argument to getCurrentPosition.
+                  * Assuming the user intended to replace the sendMessage catch block and keep the geolocation error handler separate.
+                  * The line `e.error('Geolocation error:', error);` is likely a typo for `console.error`.
+                  * I will correct the typo and keep the geolocation error handler as it was,
+                  * and apply the new catch block to the sendMessage try/catch.
+                  */ }
     }, (error) => {
       console.error('Geolocation error:', error);
       alert('Gagal mendapatkan lokasi. Pastikan izin lokasi aktif.');
@@ -359,7 +412,14 @@ ${newMessage.trim()}`
             )}
           </div>
           <div className="min-w-0">
-            <p className="font-semibold text-sm truncate">{chatTitle}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="font-semibold text-sm truncate">{chatTitle}</p>
+              {sharedSecret && (
+                <div className="flex items-center gap-0.5 text-[9px] font-black text-green-600 dark:text-green-500 bg-green-50 dark:bg-green-900/20 px-1 rounded border border-green-200/50 uppercase tracking-tighter">
+                  <Lock className="w-2 h-2" /> E2EE
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-1">
               {isTyping ? (
                 <span className="text-xs text-pink-500 flex items-center gap-1">
@@ -400,10 +460,10 @@ ${newMessage.trim()}`
           {/* On Desktop: Show call icons directly. On Mobile: Hide them if space is low or group them */}
           {!isMobile && (
             <>
-              <Button variant="ghost" size="icon" onClick={() => { setCallType('voice'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-500">
+              <Button variant="ghost" size="icon" onClick={() => { setCallType('voice'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/40 rounded-full transition-all active:scale-95">
                 <Phone className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => { setCallType('video'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-500">
+              <Button variant="ghost" size="icon" onClick={() => { setCallType('video'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/40 rounded-full transition-all active:scale-95">
                 <Video className="h-4 w-4" />
               </Button>
             </>
@@ -442,6 +502,14 @@ ${newMessage.trim()}`
           </DropdownMenu>
         </div>
       </div>
+
+      {/* Vanish Mode Status Bar */}
+      {vanishMode && (
+        <div className="bg-pink-500 text-white text-[10px] py-1 px-4 flex items-center justify-center gap-2 animate-in slide-in-from-top duration-300 font-bold uppercase tracking-widest">
+          <Ghost className="w-3 h-3 animate-pulse" />
+          <span>Vanish Mode Aktif ({vanishTimer === 60 ? '1 Menit' : '1 Jam'}) — Pesan akan menghilang setelah dibaca</span>
+        </div>
+      )}
 
       {/* Image Preview before send */}
       {imagePreview && (
@@ -534,17 +602,17 @@ ${newMessage.trim()}`
                         </p>
                       )}
 
-                      <div className={`relative flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+                      <div className={`relative flex flex-col ${isOwn ? 'items-end' : 'items-start'} group/msg`}>
                         {message.expires_at && (
-                          <div className={`flex items-center gap-1 mb-1 text-[9px] font-bold uppercase tracking-wider ${isOwn ? 'text-pink-500' : 'text-pink-400'}`}>
-                            <Clock className="w-2.5 h-2.5" />
-                            <span>Vanish: {Math.max(1, Math.ceil((new Date(message.expires_at).getTime() - Date.now()) / 1000 / 60))}m</span>
+                          <div className={`flex items-center gap-1.5 mb-1 px-2 py-0.5 rounded-full bg-pink-100/50 dark:bg-pink-900/20 text-[9px] font-bold uppercase tracking-wider ${isOwn ? 'text-pink-600' : 'text-pink-500'} border border-pink-200/50 dark:border-pink-800/50 animate-pulse`}>
+                            <Ghost className="w-2.5 h-2.5" />
+                            <span>Menghilang: {Math.max(1, Math.ceil((new Date(message.expires_at).getTime() - Date.now()) / 1000 / 60))}m</span>
                           </div>
                         )}
 
-                        <div className={`px-4 py-2 rounded-2xl relative shadow-sm ${isOwn
-                          ? isMediaMsg ? 'bg-transparent p-0' : 'bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-br-none'
-                          : isMediaMsg ? 'bg-transparent p-0' : 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-bl-none'
+                        <div className={`px-4 py-2.5 rounded-2xl relative shadow-md transition-all duration-300 hover:shadow-lg ${isOwn
+                          ? isMediaMsg ? 'bg-transparent p-0' : 'bg-gradient-to-br from-pink-500 via-rose-500 to-rose-600 text-white rounded-br-none shadow-pink-500/20 hover:scale-[1.01]'
+                          : isMediaMsg ? 'bg-transparent p-0' : 'bg-white/80 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-bl-none backdrop-blur-sm lg:hover:scale-[1.01]'
                           }`}>
                           {message.type === 'image' ? (
                             <img

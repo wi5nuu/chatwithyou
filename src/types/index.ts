@@ -16,6 +16,7 @@ export interface Profile {
 export interface Chat {
   id: string;
   created_at: string;
+  reset_at?: string | null;
   is_group?: boolean;
   name?: string | null;
   avatar_url?: string | null;
@@ -115,4 +116,13 @@ export interface User {
   id: string;
   email: string;
   publicKey: string;
+}
+export interface Friendship {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  status: 'pending' | 'accepted' | 'declined';
+  created_at: string;
+  sender?: Profile;
+  receiver?: Profile;
 }

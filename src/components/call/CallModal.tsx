@@ -22,14 +22,14 @@ const ICE_SERVERS = {
   ],
 };
 
-export function CallModal({ 
-  chatId, 
-  userId, 
-  otherUser, 
-  callType, 
-  isIncoming = false, 
+export function CallModal({
+  chatId,
+  userId,
+  otherUser,
+  callType,
+  isIncoming = false,
   incomingCall,
-  onClose 
+  onClose
 }: CallModalProps) {
   const [callStatus, setCallStatus] = useState<'ringing' | 'connected' | 'ended'>('ringing');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -38,7 +38,7 @@ export function CallModal({
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [currentCall, setCurrentCall] = useState<any>(incomingCall);
-  
+
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -76,7 +76,7 @@ export function CallModal({
       if (isIncoming && incomingCall) {
         // Incoming call - wait for user to answer
         setCurrentCall(incomingCall);
-        
+
         // Subscribe to call updates
         subscribeToCallUpdates(incomingCall.id);
       } else {
@@ -105,6 +105,14 @@ export function CallModal({
         setRemoteStream(event.streams[0]);
       };
 
+      // Handle ICE candidates
+      const iceCandidatesBuffer: RTCIceCandidate[] = [];
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          iceCandidatesBuffer.push(event.candidate);
+        }
+      };
+
       // Create offer
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -123,9 +131,32 @@ export function CallModal({
         .single();
 
       if (error) throw error;
-      
+
       setCurrentCall(callData);
       subscribeToCallUpdates(callData.id);
+      subscribeToCandidates(callData.id);
+
+      // Upload buffered candidates
+      const uploadCandidate = async (candidate: RTCIceCandidate) => {
+        await supabase
+          .from('call_candidates')
+          .insert({
+            call_id: callData.id,
+            user_id: userId,
+            candidate: candidate as any,
+          });
+      };
+
+      for (const candidate of iceCandidatesBuffer) {
+        uploadCandidate(candidate);
+      }
+
+      // Handle future candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          uploadCandidate(event.candidate);
+        }
+      };
 
     } catch (error) {
       console.error('Error starting outgoing call:', error);
@@ -146,21 +177,49 @@ export function CallModal({
         },
         async (payload) => {
           const updatedCall = payload.new;
-          
+
           if (updatedCall.status === 'connected' && updatedCall.answer) {
             // Call answered
             setCallStatus('connected');
-            
+
             if (peerConnectionRef.current) {
               await peerConnectionRef.current.setRemoteDescription(
                 new RTCSessionDescription(updatedCall.answer)
               );
             }
-            
+
             startDurationTimer();
           } else if (updatedCall.status === 'ended' || updatedCall.status === 'declined') {
             // Call ended
             endCall();
+          }
+        }
+      )
+      .subscribe();
+  };
+
+  const subscribeToCandidates = (callId: string) => {
+    supabase
+      .channel(`candidates:${callId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'call_candidates',
+          filter: `call_id=eq.${callId}`,
+        },
+        async (payload) => {
+          if (payload.new.user_id !== userId) {
+            if (peerConnectionRef.current) {
+              try {
+                await peerConnectionRef.current.addIceCandidate(
+                  new RTCIceCandidate(payload.new.candidate)
+                );
+              } catch (e) {
+                console.error('Error adding received ICE candidate', e);
+              }
+            }
           }
         }
       )
@@ -184,6 +243,24 @@ export function CallModal({
       pc.ontrack = (event) => {
         setRemoteStream(event.streams[0]);
       };
+
+      // Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          supabase
+            .from('call_candidates')
+            .insert({
+              call_id: currentCall.id,
+              user_id: userId,
+              candidate: event.candidate as any,
+            })
+            .then(({ error }) => {
+              if (error) console.error('Error sending ICE candidate:', error);
+            });
+        }
+      };
+
+      subscribeToCandidates(currentCall.id);
 
       // Set remote description (offer)
       if (currentCall.offer) {
@@ -229,7 +306,7 @@ export function CallModal({
         .update({ status: 'ended' })
         .eq('id', currentCall.id);
     }
-    
+
     cleanup();
     onClose();
   };
@@ -382,34 +459,34 @@ export function CallModal({
       </div>
 
       {/* Controls */}
-      <div className="p-6 flex items-center justify-center gap-6">
+      <div className="p-8 pb-12 flex items-center justify-center gap-6 bg-gradient-to-t from-gray-950/80 to-transparent">
         <Button
-          variant="secondary"
+          variant="ghost"
           size="lg"
-          className={`w-14 h-14 rounded-full ${isMuted ? 'bg-red-500 hover:bg-red-600' : ''}`}
+          className={`w-14 h-14 rounded-full border-none transition-all ${isMuted ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-white/10 text-white hover:bg-white/20'}`}
           onClick={toggleMute}
         >
           {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
         </Button>
-        
+
         {callType === 'video' && (
           <Button
-            variant="secondary"
+            variant="ghost"
             size="lg"
-            className={`w-14 h-14 rounded-full ${isVideoOff ? 'bg-red-500 hover:bg-red-600' : ''}`}
+            className={`w-14 h-14 rounded-full border-none transition-all ${isVideoOff ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-white/10 text-white hover:bg-white/20'}`}
             onClick={toggleVideo}
           >
             {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
           </Button>
         )}
-        
+
         <Button
           variant="destructive"
           size="lg"
-          className="w-14 h-14 rounded-full"
+          className="w-16 h-16 rounded-full shadow-lg shadow-red-500/30 hover:scale-105 transition-transform"
           onClick={endCall}
         >
-          <PhoneOff className="w-6 h-6" />
+          <PhoneOff className="w-7 h-7" />
         </Button>
       </div>
     </div>

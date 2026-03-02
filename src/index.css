@@ -169,10 +169,6 @@
     animation: float 6s ease-in-out infinite;
   }
 
-  .animate-fade-in {
-    animation: fadeIn 1s ease-out forwards;
-  }
-
   .animate-fade-in-down {
     animation: fadeInDown 1s ease-out forwards;
   }
