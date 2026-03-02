@@ -49,9 +49,10 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [imagePreview, setImagePreview] = useState<{ file: File; url: string } | null>(null);
   const [vanishMode, setVanishMode] = useState(false);
-  const [vanishTimer, setVanishTimer] = useState<number>(3600); // Default 1 hour in seconds
+  const [vanishTimer, setVanishTimer] = useState<number>(3600);
   const [wallpaper, setWallpaper] = useState<string | null>(null);
   const [showPollModal, setShowPollModal] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -98,38 +99,54 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       setMessages([]);
       setSharedSecret(null);
 
+      // Helper: decode fallback (base64) messages
+      const decodeFallback = (ciphertext: string) => {
+        try { return decodeURIComponent(escape(atob(ciphertext))); } catch { return ciphertext; }
+      };
+
       if (!chat.is_group) {
         const { data: participantData } = (await getOtherParticipant(chat.id, userId)) as any;
         if (participantData?.profile) setOtherUser(participantData.profile);
         const privateKeyStr = localStorage.getItem('lovechat_private_key');
         if (privateKeyStr && participantData?.profile?.public_key) {
-          const privateKey = await importPrivateKey(privateKeyStr);
-          const publicKey = await importPublicKey(participantData.profile.public_key);
-          const secret = await deriveSharedSecret(privateKey, publicKey);
-          setSharedSecret(secret);
-          const { data: messagesData } = (await getMessages(chat.id)) as any;
-          if (messagesData) {
-            const decrypted = await Promise.all(messagesData.map(async (msg: any) => {
-              if (msg.ciphertext) {
+          try {
+            const privateKey = await importPrivateKey(privateKeyStr);
+            const publicKey = await importPublicKey(participantData.profile.public_key);
+            const secret = await deriveSharedSecret(privateKey, publicKey);
+            setSharedSecret(secret);
+            const { data: messagesData } = (await getMessages(chat.id)) as any;
+            if (messagesData) {
+              const decrypted = await Promise.all(messagesData.map(async (msg: any) => {
+                if (msg.iv === 'plain' || !msg.ciphertext) {
+                  return { ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : '' } as Message;
+                }
                 try {
                   const text = await decryptMessage(secret, msg.ciphertext, msg.iv);
                   return { ...msg, decrypted_content: text } as Message;
-                } catch { return { ...msg, decrypted_content: '[Tidak bisa didekripsi]' } as Message; }
-              }
-              return msg as Message;
-            }));
-            setMessages(decrypted);
-          } else {
+                } catch { return { ...msg, decrypted_content: decodeFallback(msg.ciphertext) } as Message; }
+              }));
+              setMessages(decrypted);
+            }
+          } catch {
+            // Key derivation failed — load as fallback
             const { data: messagesData } = (await getMessages(chat.id)) as any;
-            if (messagesData) setMessages(messagesData as Message[]);
+            if (messagesData) setMessages(messagesData.map((msg: any) => ({
+              ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : ''
+            })) as Message[]);
           }
         } else {
+          // No public key — load messages with fallback decoding
           const { data: messagesData } = (await getMessages(chat.id)) as any;
-          if (messagesData) setMessages(messagesData as Message[]);
+          if (messagesData) setMessages(messagesData.map((msg: any) => ({
+            ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : ''
+          })) as Message[]);
         }
       } else {
+        // Group chat — decode fallback messages
         const { data: messagesData } = (await getMessages(chat.id)) as any;
-        if (messagesData) setMessages(messagesData as Message[]);
+        if (messagesData) setMessages(messagesData.map((msg: any) => ({
+          ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : ''
+        })) as Message[]);
       }
     } catch (error) { console.error('Error initializing chat:', error); }
     finally { setIsLoading(false); }
@@ -137,47 +154,60 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
 
   const decryptAndAddMessage = async (message: any) => {
     if (message.sender_id === userId) return;
-    if (sharedSecret && message.ciphertext) {
+    const decodeFallback = (ct: string) => { try { return decodeURIComponent(escape(atob(ct))); } catch { return ct; } };
+    if (message.iv === 'plain' || !sharedSecret) {
+      // Fallback: base64 encoded plain text
+      const text = message.ciphertext ? decodeFallback(message.ciphertext) : '';
+      const dm = { ...message, decrypted_content: text } as Message;
+      setMessages((prev: Message[]) => [...prev, dm]);
+      if (text) { const suggestion = await suggestReply([text]); setAiSuggestion(suggestion); }
+    } else if (sharedSecret && message.ciphertext) {
       try {
         const text = await decryptMessage(sharedSecret, message.ciphertext, message.iv);
         const dm = { ...message, decrypted_content: text } as Message;
         setMessages((prev: Message[]) => [...prev, dm]);
         const suggestion = await suggestReply([text]);
         setAiSuggestion(suggestion);
-      } catch (error) {
-        setMessages((prev: Message[]) => [...prev, { ...message, decrypted_content: '[Encrypted]' } as Message]);
+      } catch {
+        const text = message.ciphertext ? decodeFallback(message.ciphertext) : '[Pesan]';
+        setMessages((prev: Message[]) => [...prev, { ...message, decrypted_content: text } as Message]);
       }
-    } else if (chat.is_group) {
-      setMessages((prev: Message[]) => [...prev, message as Message]);
     }
   };
 
+  const encodeFallback = (text: string) => btoa(unescape(encodeURIComponent(text)));
+
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !sharedSecret) return;
+    if (!newMessage.trim()) return;
+    setSendError(null);
     try {
       const text = replyTo
-        ? `↩️ [Reply: "${(replyTo.decrypted_content || '').substring(0, 30)}..."]\n${newMessage.trim()}`
+        ? `↩️ [Reply: "${(replyTo.decrypted_content || '').substring(0, 30)}..."]
+${newMessage.trim()}`
         : newMessage.trim();
-      const encrypted = await encryptMessage(sharedSecret, text);
 
       const expires_at = vanishMode
         ? new Date(Date.now() + vanishTimer * 1000).toISOString()
         : null;
 
-      const { data } = await sendMessage({
-        chat_id: chat.id,
-        sender_id: userId,
-        type: 'text',
-        ...encrypted,
-        expires_at
-      });
+      let payload: any;
+      if (sharedSecret) {
+        const encrypted = await encryptMessage(sharedSecret, text);
+        payload = { chat_id: chat.id, sender_id: userId, type: 'text', ...encrypted, expires_at };
+      } else {
+        // Fallback: base64 encode (no E2E encryption — used for group or missing key)
+        payload = { chat_id: chat.id, sender_id: userId, type: 'text', ciphertext: encodeFallback(text), iv: 'plain', expires_at };
+      }
+
+      const { data, error } = await sendMessage(payload);
+      if (error) { setSendError('Gagal mengirim pesan'); console.error('Send error:', error); return; }
       if (data) {
         setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: text } as Message]);
         setNewMessage('');
         setAiSuggestion(null);
         setReplyTo(null);
       }
-    } catch (error) { console.error('Send error:', error); }
+    } catch (error) { console.error('Send error:', error); setSendError('Gagal mengirim pesan'); }
   };
 
   const handleSendVoice = async () => {
@@ -609,6 +639,13 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
           )}
         </div>
       </ScrollArea>
+
+      {/* Send Error */}
+      {sendError && (
+        <div className="px-4 py-1.5 bg-red-50 dark:bg-red-900/20 border-t border-red-100 dark:border-red-800 text-xs text-red-500 text-center">
+          {sendError}
+        </div>
+      )}
 
       {/* AI Suggestion */}
       {aiSuggestion && (
