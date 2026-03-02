@@ -1,4 +1,0 @@
-fastapi
-python-dotenv
-google-generativeai
-pydantic
