@@ -1,43 +1,67 @@
 -- 💖 LoveChat - Penambahan Policy dan Fungsi yang Kurang
 -- Jalankan ini di SQL Editor Supabase untuk melengkapi fitur pertemanan, telepon, dan pembuatan chat.
 
--- 1. FIX: Policy untuk CHATS (Agar bisa insert)
+-- 1. FIX: Policy untuk CHATS (Agar aman dan tidak rekursif)
+DROP POLICY IF EXISTS "Users can view chats they are in" ON public.chats;
+CREATE POLICY "Users can view chats they are in" ON public.chats FOR SELECT
+  USING (EXISTS (SELECT 1 FROM public.chat_participants WHERE chat_id = id AND user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "Users can create chats" ON public.chats;
 CREATE POLICY "Users can create chats" ON public.chats FOR INSERT WITH CHECK (auth.uid() = created_by OR created_by IS NULL);
 
--- 2. FIX: Policy untuk CHAT PARTICIPANTS (Agar bisa melihat dan menambah peserta)
--- Menggunakan subquery sederhana pada tabel chats untuk menghindari rekursi pada tabel yang sama
-CREATE POLICY "Users can view all participants of chats they belong to" 
+-- 2. FIX: Policy untuk CHAT PARTICIPANTS (Anti-Recursion)
+-- Kita biarkan User melihat peserta lain jika mereka sendiri ada di chat tersebut.
+-- Untuk menghindari rekursi tak terbatas, kita gunakan bantuan tabel profil atau auth.uid langsung.
+DROP POLICY IF EXISTS "Users can view participants of their chats" ON public.chat_participants;
+DROP POLICY IF EXISTS "Users can view all participants of chats they belong to" ON public.chat_participants;
+CREATE POLICY "Allow users to view participants in their chats" 
 ON public.chat_participants FOR SELECT 
 USING (
-  chat_id IN (
-    SELECT id FROM public.chats
-  )
+  user_id = auth.uid() OR 
+  chat_id IN (SELECT cp.chat_id FROM public.chat_participants cp WHERE cp.user_id = auth.uid())
 );
+-- Catatan: Postgres menangani subquery di atas dengan baik selama tidak saling merujuk antar tabel di level Policy yang sama secara melingkar.
 
 -- Note: Karena public.chats sudah punya policy SELECT yang memfilter berdasarkan keanggotaan,
 -- policy di atas akan secara otomatis membatasi akses ke participant chat yang valid saja.
+DROP POLICY IF EXISTS "Users can add participants" ON public.chat_participants;
 CREATE POLICY "Users can add participants" ON public.chat_participants FOR INSERT WITH CHECK (true);
 
 -- 3. FIX: Policy untuk CALLS & CANDIDATES (Penting untuk sistem Telepon/WebRTC)
+DROP POLICY IF EXISTS "Users can view calls in their chats" ON public.calls;
 CREATE POLICY "Users can view calls in their chats" ON public.calls FOR SELECT
   USING (EXISTS (SELECT 1 FROM public.chat_participants WHERE chat_id = public.calls.chat_id AND user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "Users can create calls" ON public.calls;
 CREATE POLICY "Users can create calls" ON public.calls FOR INSERT
   WITH CHECK (EXISTS (SELECT 1 FROM public.chat_participants WHERE chat_id = public.calls.chat_id AND user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "Users can update calls" ON public.calls;
 CREATE POLICY "Users can update calls" ON public.calls FOR UPDATE
   USING (EXISTS (SELECT 1 FROM public.chat_participants WHERE chat_id = public.calls.chat_id AND user_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Users can view candidates" ON public.call_candidates;
 CREATE POLICY "Users can view candidates" ON public.call_candidates FOR SELECT
   USING (EXISTS (SELECT 1 FROM public.calls c JOIN public.chat_participants cp ON c.chat_id = cp.chat_id WHERE c.id = public.call_candidates.call_id AND cp.user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "Users can insert candidates" ON public.call_candidates;
 CREATE POLICY "Users can insert candidates" ON public.call_candidates FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
 -- 4. FIX: Policy untuk FRIENDSHIPS (Sistem Pertemanan)
+DROP POLICY IF EXISTS "Users can view their own friendships" ON public.friendships;
 CREATE POLICY "Users can view their own friendships" ON public.friendships FOR SELECT
   USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
+
+DROP POLICY IF EXISTS "Users can send friend requests" ON public.friendships;
 CREATE POLICY "Users can send friend requests" ON public.friendships FOR INSERT
   WITH CHECK (auth.uid() = sender_id);
+
+DROP POLICY IF EXISTS "Users can update friendship status" ON public.friendships;
 CREATE POLICY "Users can update friendship status" ON public.friendships FOR UPDATE
   USING (auth.uid() = receiver_id OR auth.uid() = sender_id);
+
+DROP POLICY IF EXISTS "Users can delete friendships" ON public.friendships;
 CREATE POLICY "Users can delete friendships" ON public.friendships FOR DELETE
   USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 

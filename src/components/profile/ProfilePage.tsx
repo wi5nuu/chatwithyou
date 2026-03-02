@@ -105,8 +105,13 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
     };
 
     const handleSignOut = async () => {
-        await signOut();
-        onSignOut();
+        try {
+            await signOut();
+        } catch (err) {
+            console.error('SignOut error:', err);
+        } finally {
+            onSignOut();
+        }
     };
 
     const [activeTab, setActiveTab] = useState<'info' | 'friends'>('info');

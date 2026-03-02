@@ -250,7 +250,13 @@ function App() {
               darkMode={darkMode}
               onToggleDarkMode={() => setDarkMode(d => !d)}
               onBack={handleBack}
-              onSignOut={() => { setUser(null); setProfile(null); }}
+              onSignOut={() => {
+                setUser(null);
+                setProfile(null);
+                setShowProfile(false);
+                setSelectedChat(null);
+                setShowAIChat(false);
+              }}
               onProfileUpdated={() => loadUserProfile(user.id)}
             />
           )}
