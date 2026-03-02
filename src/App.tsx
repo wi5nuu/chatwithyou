@@ -122,11 +122,11 @@ function App() {
       return <LandingPage onStartChat={() => setShowLanding(false)} />;
     }
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950 p-4 relative overflow-hidden">
-        <div className="absolute top-0 -left-10 w-96 h-96 bg-rose-500/10 rounded-full blur-[100px] animate-blob" />
-        <div className="absolute bottom-0 -right-10 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] animate-blob animation-delay-2000" />
-        <div className="w-full max-w-md space-y-8 relative z-10">
-          <div className="text-center mb-10">
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950 px-4 py-8 relative overflow-x-hidden">
+        <div className="absolute top-0 -left-10 w-72 sm:w-96 h-72 sm:h-96 bg-rose-500/10 rounded-full blur-[100px] animate-blob" />
+        <div className="absolute bottom-0 -right-10 w-72 sm:w-96 h-72 sm:h-96 bg-purple-500/10 rounded-full blur-[100px] animate-blob animation-delay-2000" />
+        <div className="w-full max-w-md space-y-6 relative z-10">
+          <div className="text-center mb-6 sm:mb-10">
             <div className="inline-flex items-center gap-2 mb-4">
               <div className="w-10 h-10 bg-gradient-to-br from-rose-500 to-pink-600 rounded-xl flex items-center justify-center shadow-lg">
                 <Heart className="w-6 h-6 text-white" />
@@ -136,11 +136,11 @@ function App() {
               </span>
             </div>
           </div>
-          <div className="glass-card p-10 rounded-[3rem] luxury-shadow border-white/20">
+          <div className="glass-card p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] luxury-shadow border-white/20">
             <Button
               variant="ghost"
               onClick={() => setShowLanding(true)}
-              className="mb-8 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 font-bold"
+              className="mb-5 sm:mb-8 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 font-bold"
             >
               ← Kembali ke Beranda
             </Button>

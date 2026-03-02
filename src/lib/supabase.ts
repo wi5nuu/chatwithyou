@@ -148,16 +148,15 @@ export const getUserChats = async (userId: string) => {
 };
 
 export const createDirectChat = async (participants: string[]) => {
-  const { data: chatData, error: chatError } = await (supabase as any)
-    .from('chats')
-    .insert({ is_group: false })
-    .select()
-    .single();
-
-  if (chatError || !chatData) return { data: null, error: chatError };
-  const participantInserts = participants.map(uid => ({ chat_id: chatData.id, user_id: uid }));
-  const { error: participantsError } = await (supabase as any).from('chat_participants').insert(participantInserts);
-  return { data: chatData, error: participantsError };
+  // Menggunakan RPC function dengan SECURITY DEFINER untuk bypass RLS
+  // sehingga bisa insert participant lain selain diri sendiri
+  const { data, error } = await (supabase as any).rpc('create_direct_chat', {
+    participant_ids: participants,
+  });
+  if (error) return { data: null, error };
+  // RPC mengembalikan array, ambil elemen pertama
+  const chatData = Array.isArray(data) ? data[0] : data;
+  return { data: chatData, error: null };
 };
 
 export const createGroupChat = async (name: string, participantIds: string[], createdBy: string, avatarUrl?: string) => {

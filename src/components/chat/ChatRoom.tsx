@@ -497,7 +497,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                       </div>
                     )}
 
-                    <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[80%]`}>
+                    <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%]`}>
                       {chat.is_group && !isOwn && showAvatar && (
                         <p className="text-[10px] text-pink-500 font-bold mb-1 ml-1">
                           {sender?.display_name || sender?.email?.split('@')[0] || 'User'}
@@ -520,14 +520,14 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                             <img
                               src={message.decrypted_content || ''}
                               alt="Foto"
-                              className="max-w-full max-h-[300px] rounded-xl object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                              className="max-w-full max-h-[200px] sm:max-h-[300px] rounded-xl object-cover cursor-pointer hover:opacity-95 transition-opacity"
                               onClick={() => window.open(message.decrypted_content || '', '_blank')}
                             />
                           ) : message.type === 'video' ? (
                             <video
                               src={message.decrypted_content || ''}
                               controls
-                              className="max-w-full max-h-[300px] rounded-xl"
+                              className="max-w-full max-h-[200px] sm:max-h-[300px] rounded-xl"
                             />
                           ) : message.type === 'voice' ? (
                             <div className="flex items-center gap-2 py-1 min-w-[150px]">

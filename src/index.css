@@ -84,6 +84,13 @@
 
   html {
     scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Mobile safe area support (iPhone notch / home bar) */
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+    overscroll-behavior-y: none;
   }
 
   @keyframes blob {

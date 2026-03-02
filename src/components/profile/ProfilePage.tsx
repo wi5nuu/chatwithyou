@@ -109,9 +109,9 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
     const displayName = profile?.display_name || userEmail;
 
     return (
-        <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950">
+        <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950 overflow-hidden">
             {/* Header */}
-            <div className="p-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-3">
+            <div className="p-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-3 shrink-0">
                 <Button variant="ghost" size="icon" onClick={onBack}>
                     <ArrowLeft className="w-5 h-5" />
                 </Button>
@@ -130,12 +130,12 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
 
             <div className="flex-1 overflow-y-auto">
                 {/* Avatar Section */}
-                <div className="flex flex-col items-center py-10 bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-gray-950 border-b border-gray-100 dark:border-gray-800">
+                <div className="flex flex-col items-center py-6 sm:py-10 bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-gray-950 border-b border-gray-100 dark:border-gray-800">
                     <div className="relative mb-4">
                         <div className="absolute -inset-1 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full blur-sm opacity-50"></div>
-                        <Avatar className="w-28 h-28 relative z-10 border-4 border-white dark:border-gray-900 shadow-xl">
+                        <Avatar className="w-24 h-24 sm:w-28 sm:h-28 relative z-10 border-4 border-white dark:border-gray-900 shadow-xl">
                             <AvatarImage src={profile?.avatar_url || undefined} />
-                            <AvatarFallback className="bg-gradient-to-br from-pink-500 to-rose-500 text-white text-3xl font-bold">
+                            <AvatarFallback className="bg-gradient-to-br from-pink-500 to-rose-500 text-white text-2xl sm:text-3xl font-bold">
                                 {getInitials(userEmail)}
                             </AvatarFallback>
                         </Avatar>
@@ -152,7 +152,7 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
                         </button>
                         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
                     </div>
-                    <h3 className="text-xl font-black text-gray-900 dark:text-white">{displayName}</h3>
+                    <h3 className="text-lg sm:text-xl font-black text-gray-900 dark:text-white text-center px-4 truncate max-w-full">{displayName}</h3>
                     <p className="text-sm text-muted-foreground mt-1">
                         {profile?.online ? (
                             <span className="text-green-500 font-semibold">● Online</span>
@@ -189,7 +189,7 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
                         <div className="flex items-center gap-2 text-xs text-blue-500 font-bold uppercase tracking-widest mb-2">
                             <Mail className="w-3.5 h-3.5" /> Email
                         </div>
-                        <p className="text-gray-900 dark:text-white font-medium">{userEmail}</p>
+                        <p className="text-gray-900 dark:text-white font-medium break-all">{userEmail}</p>
                     </div>
 
                     {/* Bio */}
@@ -245,6 +245,9 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
                             <LogOut className="w-4 h-4 mr-2" /> Keluar dari Akun
                         </Button>
                     )}
+
+                    {/* Bottom spacer for iOS safe area */}
+                    <div className="h-safe-bottom pb-4" />
                 </div>
             </div>
         </div>

@@ -6,7 +6,7 @@ import { AISection } from './AISection';
 import { HowItWorks } from './HowItWorks';
 import { Testimonials } from './Testimonials';
 import { Footer } from './Footer';
-import { Heart } from 'lucide-react';
+import { Heart, Menu, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface LandingPageProps {
@@ -15,6 +15,7 @@ interface LandingPageProps {
 
 export function LandingPage({ onStartChat }: LandingPageProps) {
     const [isScrolled, setIsScrolled] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     useEffect(() => {
         const handleScroll = () => {
@@ -24,12 +25,20 @@ export function LandingPage({ onStartChat }: LandingPageProps) {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
+    const navLinks = [
+        { href: '#features', label: 'Fitur' },
+        { href: '#benefits', label: 'Manfaat' },
+        { href: '#security', label: 'Keamanan' },
+        { href: '#how-it-works', label: 'Cara Kerja' },
+        { href: '#testimonials', label: 'Testimoni' },
+    ];
+
     return (
         <div className="bg-white dark:bg-gray-950 min-h-screen">
             {/* Navigation Header */}
             <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
                 ? 'bg-white/80 dark:bg-gray-950/80 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 py-3 shadow-sm'
-                : 'bg-transparent py-6'
+                : 'bg-transparent py-4 md:py-6'
                 }`}>
                 <div className="container max-w-6xl mx-auto px-4 flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -41,21 +50,48 @@ export function LandingPage({ onStartChat }: LandingPageProps) {
                         </span>
                     </div>
 
+                    {/* Desktop nav links */}
                     <div className="hidden md:flex items-center gap-8">
-                        <a href="#features" className="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-rose-500 transition-colors uppercase tracking-widest">Fitur</a>
-                        <a href="#benefits" className="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-rose-500 transition-colors uppercase tracking-widest">Manfaat</a>
-                        <a href="#security" className="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-rose-500 transition-colors uppercase tracking-widest">Keamanan</a>
-                        <a href="#how-it-works" className="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-rose-500 transition-colors uppercase tracking-widest">Cara Kerja</a>
-                        <a href="#testimonials" className="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-rose-500 transition-colors uppercase tracking-widest">Testimoni</a>
+                        {navLinks.map(link => (
+                            <a key={link.href} href={link.href} className="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-rose-500 transition-colors uppercase tracking-widest">
+                                {link.label}
+                            </a>
+                        ))}
                     </div>
 
-                    <button
-                        onClick={onStartChat}
-                        className="px-6 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-full text-sm font-bold shadow-lg shadow-pink-500/20 transition-all hover:scale-105 transform active:scale-95"
-                    >
-                        Mulai Chat
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={onStartChat}
+                            className="px-4 md:px-6 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-full text-sm font-bold shadow-lg shadow-pink-500/20 transition-all hover:scale-105 transform active:scale-95"
+                        >
+                            Mulai Chat
+                        </button>
+                        {/* Mobile hamburger */}
+                        <button
+                            className="md:hidden p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            onClick={() => setMobileMenuOpen(o => !o)}
+                            aria-label="Toggle menu"
+                        >
+                            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                        </button>
+                    </div>
                 </div>
+
+                {/* Mobile dropdown menu */}
+                {mobileMenuOpen && (
+                    <div className="md:hidden bg-white/95 dark:bg-gray-950/95 backdrop-blur-md border-t border-gray-100 dark:border-gray-800 px-4 py-3 flex flex-col gap-1">
+                        {navLinks.map(link => (
+                            <a
+                                key={link.href}
+                                href={link.href}
+                                onClick={() => setMobileMenuOpen(false)}
+                                className="py-2.5 px-3 text-sm font-bold text-gray-700 dark:text-gray-200 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-xl transition-colors uppercase tracking-widest"
+                            >
+                                {link.label}
+                            </a>
+                        ))}
+                    </div>
+                )}
             </nav>
 
             <main>
