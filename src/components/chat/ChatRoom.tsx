@@ -134,13 +134,20 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       };
 
       if (!chat.is_group) {
+        // Try to get otherUser if not already set by props
+        let targetProfile = otherUser;
         const { data: participantData } = (await getOtherParticipant(chat.id, userId)) as any;
-        if (participantData?.profile) setOtherUser(participantData.profile);
+
+        if (participantData?.profile) {
+          targetProfile = participantData.profile;
+          setOtherUser(targetProfile);
+        }
+
         const privateKeyStr = localStorage.getItem('lovechat_private_key');
-        if (privateKeyStr && participantData?.profile?.public_key) {
+        if (privateKeyStr && targetProfile?.public_key) {
           try {
             const privateKey = await importPrivateKey(privateKeyStr);
-            const publicKey = await importPublicKey(participantData.profile.public_key);
+            const publicKey = await importPublicKey(targetProfile.public_key);
             const secret = await deriveSharedSecret(privateKey, publicKey);
             setSharedSecret(secret);
             const { data: messagesData } = (await getMessages(chat.id, effectiveResetAt)) as any;
