@@ -28,44 +28,53 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
       setError(null);
       audioChunksRef.current = [];
 
-      // Get microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Create media recorder
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/aac',
+        'audio/ogg;codecs=opus',
+        'audio/mp4'
+      ];
+
+      let selectedMimeType = '';
+      for (const mime of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+          selectedMimeType = mime;
+          break;
+        }
+      }
+
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
+        mimeType: selectedMimeType || undefined,
       });
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(audioBlob);
+        const type = selectedMimeType.split(';')[0] || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type });
+        setAudioBlob(blob);
 
-        // Convert to base64
         const reader = new FileReader();
         reader.onloadend = () => {
           const base64 = reader.result as string;
-          // Remove data URL prefix
           const base64Data = base64.split(',')[1];
           setAudioBase64(base64Data);
         };
-        reader.readAsDataURL(audioBlob);
+        reader.readAsDataURL(blob);
 
-        // Stop all tracks
         stream.getTracks().forEach((track) => track.stop());
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(100); // Collect data every 100ms
+      mediaRecorder.start(100);
       setIsRecording(true);
 
-      // Start timer
       setRecordingTime(0);
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
@@ -81,53 +90,25 @@ export function useVoiceRecorder(): UseVoiceRecorderReturn {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-
-      // Clear timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     }
   }, [isRecording]);
 
   const cancelRecording = useCallback(() => {
-    // Stop recording without saving
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
-      
-      // Stop all tracks
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-
+      if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
       setIsRecording(false);
       setAudioBlob(null);
       setAudioBase64(null);
-
-      // Clear timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-
-      // Clear chunks
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       audioChunksRef.current = [];
     }
   }, [isRecording]);
 
-  return {
-    isRecording,
-    recordingTime,
-    audioBlob,
-    audioBase64,
-    startRecording,
-    stopRecording,
-    cancelRecording,
-    error,
-  };
+  return { isRecording, recordingTime, audioBlob, audioBase64, startRecording, stopRecording, cancelRecording, error };
 }
 
-// Hook for playing voice messages
 export function useVoicePlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -135,32 +116,21 @@ export function useVoicePlayer() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const playAudio = useCallback((base64Audio: string) => {
-    // Create audio element
-    const audio = new Audio(`data:audio/webm;base64,${base64Audio}`);
+    // If it's just raw base64, wrap it. If it's already a data URL, use as is.
+    const src = base64Audio.startsWith('data:') ? base64Audio : `data:audio/webm;base64,${base64Audio}`;
+    const audio = new Audio(src);
     audioRef.current = audio;
 
-    audio.onloadedmetadata = () => {
-      setDuration(audio.duration);
-    };
+    audio.onloadedmetadata = () => setDuration(audio.duration);
+    audio.ontimeupdate = () => setCurrentTime(audio.currentTime);
+    audio.onended = () => { setIsPlaying(false); setCurrentTime(0); };
 
-    audio.ontimeupdate = () => {
-      setCurrentTime(audio.currentTime);
-    };
-
-    audio.onended = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
-
-    audio.play();
+    audio.play().catch(e => console.error('Audio playback failed:', e));
     setIsPlaying(true);
   }, []);
 
   const pauseAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    }
+    if (audioRef.current) { audioRef.current.pause(); setIsPlaying(false); }
   }, []);
 
   const stopAudio = useCallback(() => {
@@ -172,12 +142,5 @@ export function useVoicePlayer() {
     }
   }, []);
 
-  return {
-    isPlaying,
-    currentTime,
-    duration,
-    playAudio,
-    pauseAudio,
-    stopAudio,
-  };
+  return { isPlaying, currentTime, duration, playAudio, pauseAudio, stopAudio };
 }

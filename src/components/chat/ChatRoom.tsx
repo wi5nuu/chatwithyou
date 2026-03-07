@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import {
   Phone, Video, MoreVertical, Send, Mic, Play, Pause,
   ChevronLeft, Sparkles, Lock, SmilePlus, Reply, CheckCheck, X, Users, Paperclip, Plus,
-  Ghost, Image as ImageIcon, Trash2, BarChart2, MapPin, ExternalLink, User, Gamepad2
+  Ghost, Image as ImageIcon, Trash2, BarChart2, MapPin, ExternalLink, User, Gamepad2, Tv
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -72,6 +72,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const [showNotFriendDialog, setShowNotFriendDialog] = useState(false);
   const [isFriend, setIsFriend] = useState<boolean | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -94,13 +95,14 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   }, [chat.id, userId]);
 
   useRealtimeMessages(chat.id, (msg) => {
+    // Mark as delivered immediately when received in an active chat
+    markMessagesAsDelivered(chat.id, userId);
+    // Mark as read immediately if the chat room is active
+    markMessagesAsRead(chat.id, userId);
+
     // Only decrypt and add if it's not our own message (we already added our own locally)
     if (msg.sender_id !== userId) {
       decryptAndAddMessage(msg);
-      // Mark as delivered immediately when received in an active chat
-      markMessagesAsDelivered(chat.id, userId);
-      // Mark as read immediately if the chat room is active
-      markMessagesAsRead(chat.id, userId);
     }
   }, (updatedMsg) => {
     setMessages((prev: Message[]) => prev.map(m => {
@@ -145,11 +147,15 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       loadReactions();
       checkFriendStatus();
     }
-  }, [chat.id, userId]);
+  }, [chat.id, userId, otherUser?.id]);
 
   const checkFriendStatus = async () => {
-    if (chat.is_group) return;
-    const { isFriend: friend } = await checkFriendship(userId, otherUser?.id || '');
+    if (chat.is_group) {
+      setIsFriend(true);
+      return;
+    }
+    if (!otherUser?.id) return;
+    const { isFriend: friend } = await checkFriendship(userId, otherUser.id);
     setIsFriend(friend);
   };
 
@@ -246,6 +252,9 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
         await supabase.from('chats').update({ reset_at: effectiveResetAt }).eq('id', chat.id);
         setCurrentResetAt(effectiveResetAt);
       }
+
+      // Mark as read on enter
+      markMessagesAsRead(chat.id, userId);
 
       // Helper: decode fallback (base64) messages
       const decodeFallback = (ciphertext: string) => {
@@ -346,6 +355,14 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const handleOpenGames = () => {
     if (isFriend) {
       (window as any).dispatchEvent(new CustomEvent('open-games', { detail: { chatId: chat.id } }));
+    } else {
+      setShowNotFriendDialog(true);
+    }
+  };
+
+  const handleOpenMovie = () => {
+    if (isFriend) {
+      (window as any).dispatchEvent(new CustomEvent('open-movie', { detail: { chatId: chat.id } }));
     } else {
       setShowNotFriendDialog(true);
     }
@@ -920,12 +937,21 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                             ) : message.type === 'voice' ? (
                               <div className="flex items-center gap-2 py-1 min-w-[150px]">
                                 <Button variant="ghost" size="icon" className={`w-8 h-8 rounded-full ${isOwn ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-100 text-pink-500'}`}
-                                  onClick={() => isPlaying ? pauseAudio() : message.decrypted_content && playAudio(message.decrypted_content)}>
-                                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                  onClick={() => {
+                                    if (playingMessageId === message.id && isPlaying) {
+                                      pauseAudio();
+                                    } else {
+                                      if (message.decrypted_content) {
+                                        setPlayingMessageId(message.id);
+                                        playAudio(message.decrypted_content);
+                                      }
+                                    }
+                                  }}>
+                                  {playingMessageId === message.id && isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                                 </Button>
                                 <div className="flex-1">
                                   <div className={`h-1.5 rounded-full ${isOwn ? 'bg-white/30' : 'bg-gray-200 dark:bg-gray-700'}`}>
-                                    <div className={`h-full rounded-full ${isOwn ? 'bg-white' : 'bg-pink-500'}`} style={{ width: `${isPlaying ? (currentTime / duration) * 100 : 0}%` }} />
+                                    <div className={`h-full rounded-full ${isOwn ? 'bg-white' : 'bg-pink-500'}`} style={{ width: `${playingMessageId === message.id && isPlaying ? (currentTime / duration) * 100 : 0}%` }} />
                                   </div>
                                 </div>
                               </div>
@@ -1169,6 +1195,12 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                   >
                     <Gamepad2 className="w-5 h-5 transition-transform active:scale-110" />
                   </button>
+                  <button
+                    className="shrink-0 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 active:text-rose-600 transition-colors"
+                    onClick={handleOpenMovie}
+                  >
+                    <Tv className="w-5 h-5 transition-transform active:scale-110" />
+                  </button>
                 </>
               ) : (
                 <DropdownMenu>
@@ -1192,6 +1224,9 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={handleOpenGames} className="text-rose-600 dark:text-rose-400 font-bold">
                       <Gamepad2 className="w-4 h-4 mr-2" /> Main Game Bareng
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleOpenMovie} className="text-pink-600 dark:text-pink-400 font-bold">
+                      <Tv className="w-4 h-4 mr-2" /> Movie
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

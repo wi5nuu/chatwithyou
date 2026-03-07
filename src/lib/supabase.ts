@@ -357,6 +357,19 @@ export const deleteStatus = async (statusId: string) => {
   return { error };
 };
 
+export const trackStatusView = async (statusId: string, userId: string) => {
+  return await (supabase as any)
+    .from('status_views')
+    .upsert({ status_id: statusId, user_id: userId }, { onConflict: 'status_id,user_id' });
+};
+
+export const getStatusViews = async (statusId: string) => {
+  return await (supabase as any)
+    .from('status_views')
+    .select('*, profile:user_id(id, email, display_name, avatar_url)')
+    .eq('status_id', statusId);
+};
+
 // ─── Polls ────────────────────────────────────────────────────────────────────
 
 export const createPoll = async (poll: {

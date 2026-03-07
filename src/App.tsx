@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, Routes, Route, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { SignupForm } from '@/components/auth/SignupForm';
@@ -12,9 +13,11 @@ import { LandingPage } from '@/components/landing/LandingPage';
 import { CallModal } from '@/components/call/CallModal';
 import { GamesPage } from '@/components/games/GamesPage';
 import { SettingsPage } from '@/components/settings/SettingsPage';
-import { getCurrentUser, supabase, getProfile } from '@/lib/supabase';
+import { MovieRoom } from '@/components/chat/MovieRoom';
+import { getCurrentUser, supabase, getProfile, getUserChats } from '@/lib/supabase';
 import { useOnlineStatus } from '@/hooks/useRealtime';
-import { useGlobalMessageNotifications } from '@/hooks/useNotifications';
+import { useGlobalMessageNotifications, useGlobalCallNotifications } from '@/hooks/useNotifications';
+import { useTabNotification } from '@/hooks/useTabNotification';
 import type { Chat, Profile } from '@/types';
 import { Heart } from 'lucide-react';
 
@@ -25,17 +28,45 @@ function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showLanding, setShowLanding] = useState(true);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
-  const [showAIChat, setShowAIChat] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
-  const [showGames, setShowGames] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [activeCall, setActiveCall] = useState<any>(null);
   const [callerProfile, setCallerProfile] = useState<Profile | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [totalUnread, setTotalUnread] = useState(0);
 
   useOnlineStatus(user?.id || null);
   useGlobalMessageNotifications(user?.id || null, selectedChat?.id || null);
+  useGlobalCallNotifications(user?.id || null);
+  useTabNotification(totalUnread);
+
+  // Load total stats
+  useEffect(() => {
+    if (!user?.id) return;
+    const loadStats = async () => {
+      const { data } = await getUserChats(user.id);
+      if (data) {
+        const total = data.reduce((acc: number, item: any) => {
+          const chat = (item as any).chats;
+          const unread = chat.messages?.filter((m: any) => m.sender_id !== user.id && !m.is_read).length || 0;
+          return acc + unread;
+        }, 0);
+        setTotalUnread(total);
+      }
+    };
+    loadStats();
+
+    const channel = supabase.channel('global-unread')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        loadStats();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
 
   useEffect(() => {
     const saved = localStorage.getItem('lovechat_darkmode');
@@ -50,8 +81,16 @@ function App() {
 
   useEffect(() => {
     const handle = () => setIsMobile(window.innerWidth < 768);
+    const handleBeforeInstall = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
     window.addEventListener('resize', handle);
-    return () => window.removeEventListener('resize', handle);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => {
+      window.removeEventListener('resize', handle);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
   }, []);
 
   useEffect(() => {
@@ -130,45 +169,41 @@ function App() {
     if (data) setProfile(data as Profile);
   };
 
+  // Persist selected chat on refresh
+  useEffect(() => {
+    const chatPathMatch = location.pathname.match(/\/chat\/([^\/]+)/);
+    const moviePathMatch = location.pathname.match(/\/movie\/([^\/]+)/);
+    const chatId = chatPathMatch?.[1] || moviePathMatch?.[1];
+
+    if (chatId && user && (!selectedChat || selectedChat.id !== chatId)) {
+      const loadChat = async () => {
+        const { data } = await getUserChats(user.id);
+        if (data) {
+          const chatItem = data.find((item: any) => item.chat_id === chatId);
+          if (chatItem) {
+            const chatObj = (chatItem as any).chats;
+            setSelectedChat({
+              id: chatObj.id,
+              created_at: chatObj.created_at,
+              reset_at: chatObj.reset_at,
+              is_group: chatObj.is_group,
+              name: chatObj.name,
+              avatar_url: chatObj.avatar_url,
+              participants: chatObj.participants,
+            } as Chat);
+          }
+        }
+      };
+      loadChat();
+    }
+  }, [location.pathname, user, selectedChat]);
+
   const handleAuthSuccess = async () => {
     await checkAuth();
   };
 
-  const handleSelectChat = (chat: Chat) => {
-    setSelectedChat(chat);
-    setShowAIChat(false);
-    setShowProfile(false);
-    setShowGames(false);
-  };
-
-  const handleOpenAIChat = () => {
-    setShowAIChat(true);
-    setSelectedChat(null);
-    setShowProfile(false);
-    setShowGames(false);
-  };
-
-  const handleOpenProfile = () => {
-    setShowProfile(true);
-    setSelectedChat(null);
-    setShowAIChat(false);
-    setShowGames(false);
-    setShowSettings(false);
-  };
-
-  const handleOpenSettings = () => {
-    setShowSettings(true);
-    setShowProfile(false);
-    setSelectedChat(null);
-    setShowAIChat(false);
-    setShowGames(false);
-  };
-
   const handleOpenGames = (chatId?: string) => {
-    setShowGames(true);
-    setSelectedChat(null);
-    setShowAIChat(false);
-    setShowProfile(false);
+    navigate('/games');
     if (chatId) console.log('Opening games for partner chat:', chatId);
   };
 
@@ -180,13 +215,19 @@ function App() {
     return () => window.removeEventListener('open-games', handleOpenFromChat);
   }, []);
 
-  const handleBack = () => {
-    setSelectedChat(null);
-    setShowAIChat(false);
-    setShowProfile(false);
-    setShowGames(false);
-    setShowSettings(false);
+  const handleOpenMovieRoom = (chatId?: string) => {
+    if (chatId) navigate(`/movie/${chatId}`);
+    else navigate('/movie/general');
   };
+
+  useEffect(() => {
+    const handleOpenFromChat = (e: any) => {
+      handleOpenMovieRoom(e.detail.chatId);
+    };
+    window.addEventListener('open-movie', handleOpenFromChat);
+    return () => window.removeEventListener('open-movie', handleOpenFromChat);
+  }, []);
+
 
   if (isLoading) {
     return (
@@ -255,8 +296,9 @@ function App() {
     );
   }
 
-  const showSidebar = !isMobile || (!selectedChat && !showAIChat && !showProfile && !showGames && !showSettings);
-  const showMain = !isMobile || selectedChat || showAIChat || showProfile || showGames || showSettings;
+  const isMainPath = location.pathname === '/';
+  const showSidebar = !isMobile || isMainPath;
+  const showMain = !isMobile || !isMainPath;
 
   return (
     <main className="h-screen flex bg-gray-50 dark:bg-gray-950">
@@ -269,13 +311,16 @@ function App() {
             userAvatar={profile?.avatar_url}
             userDisplayName={profile?.display_name}
             selectedChat={selectedChat}
-            onSelectChat={handleSelectChat}
+            onSelectChat={(chat) => {
+              setSelectedChat(chat);
+              navigate(`/chat/${chat.id}`);
+            }}
             darkMode={darkMode}
             onToggleDarkMode={() => setDarkMode(d => !d)}
-            onOpenAIChat={handleOpenAIChat}
-            onOpenProfile={handleOpenProfile}
-            onOpenGames={handleOpenGames}
-            onOpenSettings={handleOpenSettings}
+            onOpenAIChat={() => navigate('/ai-chat')}
+            onOpenProfile={() => navigate('/profile')}
+            onOpenGames={() => navigate('/games')}
+            onOpenSettings={() => navigate('/settings')}
           />
         </div>
       )}
@@ -283,70 +328,87 @@ function App() {
       {/* Main Panel */}
       {showMain && (
         <div className={`${isMobile ? 'w-full animate-slide-in' : 'flex-1'} h-full overflow-hidden relative`}>
-          {showProfile && (
-            <ProfilePage
-              userId={user.id}
-              userEmail={user.email}
-              darkMode={darkMode}
-              onToggleDarkMode={() => setDarkMode(d => !d)}
-              onBack={handleBack}
-              onSignOut={() => {
-                setUser(null);
-                setProfile(null);
-                setShowProfile(false);
-                setSelectedChat(null);
-                setShowAIChat(false);
-              }}
-              onProfileUpdated={() => loadUserProfile(user.id)}
-            />
-          )}
+          <Routes>
+            <Route path="/profile" element={
+              <ProfilePage
+                userId={user.id}
+                userEmail={user.email}
+                darkMode={darkMode}
+                onToggleDarkMode={() => setDarkMode(d => !d)}
+                onBack={() => navigate('/')}
+                onSignOut={() => {
+                  setUser(null);
+                  setProfile(null);
+                  navigate('/');
+                }}
+                onProfileUpdated={() => loadUserProfile(user.id)}
+              />
+            } />
 
-          {showGames && (
-            <GamesPage
-              userId={user.id}
-              onBack={handleBack}
-            />
-          )}
+            <Route path="/games" element={
+              <GamesPage
+                userId={user.id}
+                onBack={() => navigate('/')}
+              />
+            } />
 
-          {showSettings && (
-            <SettingsPage
-              userId={user.id}
-              userEmail={user.email}
-              onBack={handleBack}
-            />
-          )}
+            <Route path="/settings" element={
+              <SettingsPage
+                userId={user.id}
+                userEmail={user.email}
+                onBack={() => navigate('/')}
+                deferredPrompt={deferredPrompt}
+              />
+            } />
 
-          {selectedChat && !showProfile && !showGames && !showSettings && (
-            <ChatRoom
-              chat={selectedChat}
-              userId={user.id}
-              userEmail={user.email}
-              onBack={handleBack}
-              isMobile={isMobile}
-            />
-          )}
-          {showAIChat && !showProfile && !showSettings && (
-            <AIChat
-              userId={user.id}
-              userEmail={user.email}
-              onBack={handleBack}
-            />
-          )}
-          {!isMobile && !selectedChat && !showAIChat && !showProfile && !showSettings && (
-            <div className="flex-1 h-full flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-              <div className="text-center p-8">
-                <div className="w-24 h-24 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <Heart className="w-12 h-12 text-white" />
+            <Route path="/chat/:id" element={
+              selectedChat ? (
+                <ChatRoom
+                  chat={selectedChat}
+                  userId={user.id}
+                  userEmail={user.email}
+                  onBack={() => navigate('/')}
+                  isMobile={isMobile}
+                />
+              ) : <div className="h-full flex items-center justify-center">Memuat Chat...</div>
+            } />
+
+            <Route path="/movie/:id" element={
+              selectedChat ? (
+                <MovieRoom
+                  chat={selectedChat}
+                  userId={user.id}
+                  onBack={() => navigate(`/chat/${selectedChat.id}`)}
+                />
+              ) : <div className="h-full flex items-center justify-center">Pilih chat terlebih dahulu untuk nonton bareng</div>
+            } />
+
+            <Route path="/ai-chat" element={
+              <AIChat
+                userId={user.id}
+                userEmail={user.email}
+                onBack={() => navigate('/')}
+              />
+            } />
+
+            <Route path="/" element={
+              !isMobile ? (
+                <div className="flex-1 h-full flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+                  <div className="text-center p-8">
+                    <div className="w-24 h-24 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <Heart className="w-12 h-12 text-white" />
+                    </div>
+                    <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent">LoveChat</h2>
+                    <p className="text-muted-foreground max-w-sm mb-6">Pilih chat dari daftar atau mulai chat baru untuk mengobrol.</p>
+                    <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                      <div className="w-2 h-2 bg-green-500 rounded-full" />
+                      <span>Terenkripsi end-to-end</span>
+                    </div>
+                  </div>
                 </div>
-                <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent">LoveChat</h2>
-                <p className="text-muted-foreground max-w-sm mb-6">Pilih chat dari daftar atau mulai chat baru untuk mengobrol.</p>
-                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                  <div className="w-2 h-2 bg-green-500 rounded-full" />
-                  <span>Terenkripsi end-to-end</span>
-                </div>
-              </div>
-            </div>
-          )}
+              ) : null
+            } />
+          </Routes>
         </div>
       )}
       {/* Global Call Overlay */}

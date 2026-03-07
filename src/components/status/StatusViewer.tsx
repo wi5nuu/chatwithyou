@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { X, ChevronRight, Trash2, Eye } from 'lucide-react';
+import { trackStatusView, getStatusViews } from '@/lib/supabase';
 import type { Status } from '@/types';
 
 interface StatusViewerProps {
@@ -13,6 +14,8 @@ interface StatusViewerProps {
 export function StatusViewer({ statuses, startIndex = 0, userId, onClose, onDelete }: StatusViewerProps) {
     const [current, setCurrent] = useState(startIndex);
     const [progress, setProgress] = useState(0);
+    const [viewers, setViewers] = useState<any[]>([]);
+    const [showViewers, setShowViewers] = useState(false);
 
     const status = statuses[current];
     const DURATION = 5000;
@@ -33,8 +36,21 @@ export function StatusViewer({ statuses, startIndex = 0, userId, onClose, onDele
                 }
             }
         }, 50);
+
+        // Track view
+        if (userId && status?.id) {
+            trackStatusView(status.id, userId);
+        }
+
+        // Fetch viewers if owner
+        if (userId === status?.user_id) {
+            getStatusViews(status.id).then(({ data }: { data: any }) => {
+                if (data) setViewers(data);
+            });
+        }
+
         return () => clearInterval(interval);
-    }, [current, statuses.length]);
+    }, [current, statuses.length, userId, status?.id, status?.user_id]);
 
     if (!status) return null;
 
@@ -88,19 +104,20 @@ export function StatusViewer({ statuses, startIndex = 0, userId, onClose, onDele
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 flex items-center justify-center">
+                <div className="flex-1 flex items-center justify-center bg-black overflow-hidden relative">
                     {status.media_type === 'image' && status.media_url ? (
                         <img
                             src={status.media_url}
                             alt="Status"
-                            className="w-full h-full object-cover"
+                            className="max-h-full max-w-full object-contain"
                         />
                     ) : status.media_type === 'video' && status.media_url ? (
                         <video
                             src={status.media_url}
-                            className="w-full h-full object-cover"
+                            className="max-h-full max-w-full object-contain"
                             autoPlay
                             muted
+                            playsInline
                         />
                     ) : (
                         <div className="flex items-center justify-center w-full h-full bg-gradient-to-br from-pink-900 to-purple-900">
@@ -109,22 +126,48 @@ export function StatusViewer({ statuses, startIndex = 0, userId, onClose, onDele
                     )}
                 </div>
 
-                {/* Navigation overlay */}
-                {current > 0 && (
-                    <button
-                        onClick={() => setCurrent(c => c - 1)}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-2 bg-black/30 rounded-full text-white hover:bg-black/50"
-                    >
-                        <ChevronLeft className="w-5 h-5" />
-                    </button>
-                )}
-                {current < statuses.length - 1 && (
-                    <button
-                        onClick={() => setCurrent(c => c + 1)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-2 bg-black/30 rounded-full text-white hover:bg-black/50"
-                    >
-                        <ChevronRight className="w-5 h-5" />
-                    </button>
+                {/* Viewers Toggle */}
+                {userId === status.user_id && (
+                    <div className="absolute bottom-6 left-0 right-0 z-20 flex flex-col items-center">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowViewers(!showViewers);
+                            }}
+                            className="flex flex-col items-center gap-1 text-white/80 hover:text-white transition-colors"
+                        >
+                            <ChevronRight className={`w-5 h-5 transition-transform ${showViewers ? 'rotate-90' : '-rotate-90'}`} />
+                            <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/10">
+                                <Eye className="w-4 h-4" />
+                                <span className="text-xs font-bold">{viewers.length} Tayangan</span>
+                            </div>
+                        </button>
+
+                        {showViewers && (
+                            <div className="mt-4 w-full max-h-48 overflow-y-auto bg-black/80 backdrop-blur-xl border-t border-white/10 p-4 animate-in slide-in-from-bottom duration-300">
+                                <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-3">Dilihat Oleh</p>
+                                <div className="space-y-3">
+                                    {viewers.length > 0 ? viewers.map((v, i) => (
+                                        <div key={i} className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center text-xs font-bold text-white">
+                                                {v.profile?.avatar_url ? (
+                                                    <img src={v.profile.avatar_url} className="w-full h-full rounded-full object-cover" />
+                                                ) : (
+                                                    (v.profile?.display_name || v.profile?.email || '?')[0].toUpperCase()
+                                                )}
+                                            </div>
+                                            <div>
+                                                <p className="text-white text-xs font-bold">{v.profile?.display_name || v.profile?.email?.split('@')[0]}</p>
+                                                <p className="text-white/40 text-[10px]">{new Date(v.created_at).toLocaleTimeString()}</p>
+                                            </div>
+                                        </div>
+                                    )) : (
+                                        <p className="text-white/40 text-xs italic text-center py-4">Belum ada tayangan</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 )}
             </div>
         </div>

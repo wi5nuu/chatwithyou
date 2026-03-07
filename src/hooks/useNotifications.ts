@@ -120,7 +120,6 @@ export function useGlobalMessageNotifications(
 
                         showMessageNotification(senderName, preview, msg.chat_id, avatarUrl);
                     } catch (e) {
-                        // Still show notification even if profile fetch fails
                         showMessageNotification('Seseorang', '📨 Pesan baru', msg.chat_id);
                     }
                 }
@@ -129,4 +128,58 @@ export function useGlobalMessageNotifications(
 
         return () => { supabase.removeChannel(channel); };
     }, [userId, currentChatId, showMessageNotification]);
+}
+
+/**
+ * Subscribe to incoming calls across ALL chats and show notifications.
+ */
+export function useGlobalCallNotifications(userId: string | null) {
+    const { showMessageNotification } = useNotifications(userId);
+
+    useEffect(() => {
+        if (!userId) return;
+
+        const channel = supabase
+            .channel(`global_call_notifications:${userId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'calls',
+                },
+                async (payload) => {
+                    const call = payload.new as any;
+                    // Skip if we are the caller
+                    if (call.caller_id === userId) return;
+                    if (call.status !== 'ringing') return;
+
+                    // Get caller profile
+                    try {
+                        const { data: profile } = await (supabase as any)
+                            .from('profiles')
+                            .select('display_name, avatar_url, email')
+                            .eq('id', call.caller_id)
+                            .single();
+
+                        const p = profile as any;
+                        const senderName = p?.display_name || p?.email?.split('@')[0] || 'Seseorang';
+                        const avatarUrl = p?.avatar_url;
+
+                        const type = call.type === 'video' ? 'Video' : 'Suara';
+                        showMessageNotification(
+                            senderName,
+                            `📞 Panggilan ${type} Masuk...`,
+                            call.chat_id,
+                            avatarUrl
+                        );
+                    } catch (e) {
+                        showMessageNotification('Seseorang', '📞 Panggilan Masuk...', call.chat_id);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, [userId, showMessageNotification]);
 }

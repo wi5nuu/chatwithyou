@@ -33,15 +33,39 @@ interface SettingsPageProps {
     userId: string;
     userEmail: string;
     onBack: () => void;
+    deferredPrompt?: any;
 }
 
 type SettingsTab = 'main' | 'account' | 'privacy' | 'chats' | 'notifications' | 'storage' | 'help';
 
-export function SettingsPage({ userId, userEmail, onBack }: SettingsPageProps) {
+export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: SettingsPageProps) {
     const [activeTab, setActiveTab] = useState<SettingsTab>('main');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showClearChatsConfirm, setShowClearChatsConfirm] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
+
+    const handleRequestNotificationPermission = async () => {
+        const permission = await Notification.requestPermission();
+        setNotificationPermission(permission);
+        if (permission === 'granted') {
+            toast.success('Pemberitahuan desktop diaktifkan!');
+        } else {
+            toast.error('Izin pemberitahuan ditolak');
+        }
+    };
+
+    const handleInstallApp = async () => {
+        if (!deferredPrompt) {
+            toast.info('Aplikasi sudah terinstal atau tidak didukung di browser ini');
+            return;
+        }
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            toast.success('Terima kasih telah menginstal LoveChat!');
+        }
+    };
 
     const handleClearAllChats = async () => {
         try {
@@ -188,6 +212,12 @@ export function SettingsPage({ userId, userEmail, onBack }: SettingsPageProps) {
                 <ScrollArea className="flex-1">
                     <div className="p-4">
                         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
+                            <SettingItem
+                                icon={Bell}
+                                title="Pemberitahuan Desktop/Perangkat"
+                                description={notificationPermission === 'granted' ? 'Aktif' : 'Klik untuk aktifkan'}
+                                onClick={handleRequestNotificationPermission}
+                            />
                             <SettingItem icon={Bell} title="Nada Percakapan" description="Default" onClick={() => toast.success('Pengaturan diperbarui')} />
                             <SettingItem icon={Smartphone} title="Getar" description="Default" onClick={() => toast.success('Pengaturan diperbarui')} />
                         </div>
@@ -261,6 +291,14 @@ export function SettingsPage({ userId, userEmail, onBack }: SettingsPageProps) {
                     <SettingItem icon={MessageSquare} title="Chat" description="Wallpaper, riwayat chat" onClick={() => setActiveTab('chats')} />
                     <SettingItem icon={Bell} title="Notifikasi" description="Nada pesan & grup" onClick={() => setActiveTab('notifications')} />
                     <SettingItem icon={Database} title="Penyimpanan dan Data" description="Penggunaan jaringan" onClick={() => setActiveTab('storage')} />
+                    {deferredPrompt && (
+                        <SettingItem
+                            icon={Smartphone}
+                            title="Instal LoveChat"
+                            description="Tambahkan ke layar utama"
+                            onClick={handleInstallApp}
+                        />
+                    )}
                     <SettingItem icon={HelpCircle} title="Bantuan" description="Pusat bantuan, info aplikasi" onClick={() => setActiveTab('help')} />
                 </div>
 

@@ -134,7 +134,8 @@ export function CallModal({
 
       setCurrentCall(callData);
       subscribeToCallUpdates(callData.id);
-      subscribeToCandidates(callData.id);
+      const processBuffer = subscribeToCandidates(callData.id);
+      (window as any).processBuffer = processBuffer; // Temporary storage to use in subscribeToCallUpdates
 
       // Upload buffered candidates
       const uploadCandidate = async (candidate: RTCIceCandidate) => {
@@ -186,6 +187,10 @@ export function CallModal({
               await peerConnectionRef.current.setRemoteDescription(
                 new RTCSessionDescription(updatedCall.answer)
               );
+              // Process any buffered candidates after remote description is set
+              if ((window as any).processBuffer) {
+                await (window as any).processBuffer();
+              }
             }
 
             startDurationTimer();
@@ -199,6 +204,8 @@ export function CallModal({
   };
 
   const subscribeToCandidates = (callId: string) => {
+    const candidatesBuffer: RTCIceCandidate[] = [];
+
     supabase
       .channel(`candidates:${callId}`)
       .on(
@@ -211,19 +218,37 @@ export function CallModal({
         },
         async (payload) => {
           if (payload.new.user_id !== userId) {
-            if (peerConnectionRef.current) {
+            const pc = peerConnectionRef.current;
+            const candidate = new RTCIceCandidate(payload.new.candidate);
+
+            if (pc && pc.remoteDescription && pc.remoteDescription.type) {
               try {
-                await peerConnectionRef.current.addIceCandidate(
-                  new RTCIceCandidate(payload.new.candidate)
-                );
+                await pc.addIceCandidate(candidate);
               } catch (e) {
                 console.error('Error adding received ICE candidate', e);
               }
+            } else {
+              candidatesBuffer.push(candidate);
             }
           }
         }
       )
       .subscribe();
+
+    // Export a way to process the buffer once remote description is ready
+    return async () => {
+      const pc = peerConnectionRef.current;
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        for (const candidate of candidatesBuffer) {
+          try {
+            await pc.addIceCandidate(candidate);
+          } catch (e) {
+            console.error('Error adding buffered ICE candidate', e);
+          }
+        }
+        candidatesBuffer.length = 0; // Clear buffer
+      }
+    };
   };
 
   const answerCall = async () => {
@@ -260,11 +285,13 @@ export function CallModal({
         }
       };
 
-      subscribeToCandidates(currentCall.id);
+      const processBuffer = subscribeToCandidates(currentCall.id);
 
       // Set remote description (offer)
       if (currentCall.offer) {
         await pc.setRemoteDescription(new RTCSessionDescription(currentCall.offer));
+        // Process buffered candidates right after setting the offer
+        await processBuffer();
       }
 
       // Create answer

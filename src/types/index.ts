@@ -34,7 +34,7 @@ export interface ChatParticipant {
   profile?: Profile;
 }
 
-export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'poll' | 'location' | 'deleted';
+export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'poll' | 'location' | 'deleted' | 'movie_chat';
 
 export interface Message {
   id: string;
