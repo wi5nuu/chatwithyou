@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
-import type { Poll } from '@/types';
+import type { Poll, Message } from '@/types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -199,22 +199,55 @@ export const getMessages = async (chatId: string, resetAt?: string | null) => {
   return { data, error };
 };
 
-export const sendMessage = async (message: {
-  chat_id: string;
-  sender_id: string;
-  type: 'text' | 'voice' | 'call' | 'image' | 'video' | 'poll';
-  ciphertext?: string;
-  iv?: string;
-  hash?: string;
-  expires_at?: string | null;
-  is_delivered?: boolean;
-}) => {
-  const { data, error } = await supabase
+export const sendMessage = async (message: Partial<Message>) => {
+  const { data, error } = await (supabase as any)
     .from('messages')
-    .insert({ ...message, is_delivered: message.is_delivered || false })
-    .select()
+    .insert(message)
+    .select(`
+      *,
+      sender:sender_id (id, email, display_name, avatar_url),
+      reply_to_message:reply_to_id (*)
+    `)
     .single();
   return { data, error };
+};
+
+export const updateMessage = async (messageId: string, updates: Partial<Message>) => {
+  const { data, error } = await (supabase as any)
+    .from('messages')
+    .update({ ...updates, is_edited: true })
+    .eq('id', messageId)
+    .select(`
+      *,
+      sender:sender_id (id, email, display_name, avatar_url)
+    `)
+    .single();
+  return { data, error };
+};
+
+export const deleteMessage = async (messageId: string, forEveryone: boolean) => {
+  if (forEveryone) {
+    // Standard WhatsApp delete: replace content with placeholder
+    const { data, error } = await (supabase as any)
+      .from('messages')
+      .update({
+        ciphertext: '🚫 Pesan ini telah dihapus',
+        iv: 'plain',
+        type: 'deleted',
+        ciphertext_hash: 'deleted'
+      })
+      .eq('id', messageId)
+      .select()
+      .single();
+    return { data, error };
+  } else {
+    // Delete for me
+    const { error } = await (supabase as any)
+      .from('messages')
+      .delete()
+      .eq('id', messageId);
+    return { error };
+  }
 };
 
 export const markMessagesAsDelivered = async (chatId: string, userId: string) => {
@@ -529,26 +562,33 @@ export const subscribeToProfile = (userId: string, callback: (payload: any) => v
 };
 
 // ─── Friendships ─────────────────────────────────────────────────────────────
-
 export const sendFriendRequest = async (senderId: string, receiverId: string) => {
-  // Check if request already exists in either direction
-  const { data: existing } = await (supabase as any)
-    .from('friendships')
-    .select('id, status')
-    .or(`and(sender_id.eq.${senderId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${senderId})`)
-    .maybeSingle();
+  try {
+    // Check if request already exists in either direction
+    const { data: existing, error: fetchError } = await (supabase as any)
+      .from('friendships')
+      .select('id, status, sender_id, receiver_id')
+      .or(`and(sender_id.eq.${senderId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${senderId})`)
+      .maybeSingle();
 
-  if (existing) {
-    if (existing.status === 'accepted') return { data: existing, error: { message: 'Sudah berteman' } };
-    return { data: existing, error: { message: 'Permintaan sudah ada' } };
+    if (fetchError) throw fetchError;
+
+    if (existing) {
+      if (existing.status === 'accepted') return { data: existing, error: { message: 'Sudah berteman' } };
+      if (existing.sender_id === senderId) return { data: existing, error: { message: 'Permintaan sudah dikirim' } };
+      return { data: existing, error: { message: 'User ini sudah mengirim permintaan kepadamu' } };
+    }
+
+    const { data, error } = await (supabase as any)
+      .from('friendships')
+      .insert({ sender_id: senderId, receiver_id: receiverId, status: 'pending' })
+      .select()
+      .single();
+    return { data, error };
+  } catch (err: any) {
+    console.error('sendFriendRequest catch error:', err);
+    return { data: null, error: err };
   }
-
-  const { data, error } = await (supabase as any)
-    .from('friendships')
-    .insert({ sender_id: senderId, receiver_id: receiverId, status: 'pending' })
-    .select()
-    .single();
-  return { data, error };
 };
 
 export const getFriends = async (userId: string) => {
@@ -575,6 +615,10 @@ export const getPendingRequests = async (userId: string) => {
     .eq('status', 'pending');
   return { data, error };
 };
+
+// sendMessage merged into messages section above
+// updateMessage merged into messages section above
+// deleteMessage merged into messages section above
 
 export const respondToFriendRequest = async (requestId: string, status: 'accepted' | 'declined') => {
   const { data, error } = await (supabase as any)

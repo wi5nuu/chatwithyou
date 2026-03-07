@@ -34,7 +34,7 @@ export interface ChatParticipant {
   profile?: Profile;
 }
 
-export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'poll' | 'location';
+export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'poll' | 'location' | 'deleted';
 
 export interface Message {
   id: string;
@@ -53,6 +53,9 @@ export interface Message {
   location?: { lat: number; lng: number; address?: string };
   is_delivered?: boolean;
   is_read?: boolean;
+  is_edited?: boolean;
+  reply_to_id?: string | null;
+  reply_to_message?: Message | null;
 }
 
 export interface Call {

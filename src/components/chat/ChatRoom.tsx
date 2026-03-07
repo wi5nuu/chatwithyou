@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone, Video, MoreVertical, Send, Mic, Play, Pause,
   ChevronLeft, Sparkles, Lock, SmilePlus, Reply, CheckCheck, X, Users, Paperclip, Plus,
@@ -20,7 +19,8 @@ import {
 import {
   getMessages, sendMessage, getOtherParticipant, uploadImage, uploadVideo,
   createPoll, markMessagesAsRead, markMessagesAsDelivered, supabase,
-  addMessageReaction, clearChat, checkFriendship, sendFriendRequest
+  addMessageReaction, clearChat, checkFriendship, sendFriendRequest,
+  updateMessage, deleteMessage
 } from '@/lib/supabase';
 import { useRealtimeMessages, useTypingIndicator, useRealtimeProfile } from '@/hooks/useRealtime';
 import { useVoiceRecorder, useVoicePlayer } from '@/hooks/useVoiceRecorder';
@@ -71,6 +71,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const [wallpaperUrlInput, setWallpaperUrlInput] = useState('');
   const [showNotFriendDialog, setShowNotFriendDialog] = useState(false);
   const [isFriend, setIsFriend] = useState<boolean | null>(null);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -102,9 +103,17 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       markMessagesAsRead(chat.id, userId);
     }
   }, (updatedMsg) => {
-    setMessages((prev: Message[]) => prev.map(m =>
-      m.id === updatedMsg.id ? { ...m, is_delivered: updatedMsg.is_delivered, is_read: updatedMsg.is_read } : m
-    ));
+    setMessages((prev: Message[]) => prev.map(m => {
+      if (m.id !== updatedMsg.id) return m;
+
+      // Handle deleted messages
+      if (updatedMsg.type === 'deleted') {
+        return { ...m, ...updatedMsg, decrypted_content: '🚫 Pesan ini telah dihapus' };
+      }
+
+      // Handle normal updates (delivered, read, edited)
+      return { ...m, ...updatedMsg };
+    }));
   });
 
   // Keep other user's online status and profile info in sync
@@ -244,7 +253,8 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
             const { data: messagesData } = (await getMessages(chat.id, effectiveResetAt)) as any;
             if (messagesData) {
               const decrypted = await Promise.all(messagesData.map(async (msg: any) => {
-                if (msg.iv === 'plain' || !msg.ciphertext) {
+                // Polling data is often stored with options, don't treat as purely encrypted text if type is poll
+                if (msg.type === 'poll' || msg.iv === 'plain' || !msg.ciphertext) {
                   return { ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : '' } as Message;
                 }
                 try {
@@ -323,12 +333,12 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const decryptAndAddMessage = async (message: any) => {
     if (message.sender_id === userId) return;
     const decodeFallback = (ct: string) => { try { return decodeURIComponent(escape(atob(ct))); } catch { return ct; } };
-    if (message.iv === 'plain' || !sharedSecret) {
-      // Fallback: base64 encoded plain text
-      const text = message.ciphertext ? decodeFallback(message.ciphertext) : '';
+    if (message.iv === 'plain' || !sharedSecret || message.type === 'poll') {
+      // Fallback: base64 encoded plain text or poll (polls handled specially)
+      const text = message.ciphertext ? decodeFallback(message.ciphertext) : (message.type === 'poll' ? message.polls?.question : '');
       const dm = { ...message, decrypted_content: text } as Message;
       setMessages((prev: Message[]) => [...prev, dm]);
-      if (text) { const suggestion = await suggestReply([text]); setAiSuggestion(suggestion); }
+      if (text && message.type === 'text') { const suggestion = await suggestReply([text]); setAiSuggestion(suggestion); }
     } else if (sharedSecret && message.ciphertext) {
       try {
         const text = await decryptMessage(sharedSecret, message.ciphertext, message.iv);
@@ -346,13 +356,35 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const encodeFallback = (text: string) => btoa(unescape(encodeURIComponent(text)));
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() && !editingMessage) return;
     setSendError(null);
     try {
-      const text = replyTo
-        ? `↩️ [Reply: "${(replyTo.decrypted_content || '').substring(0, 30)}..."]
-${newMessage.trim()}`
-        : newMessage.trim();
+      const text = newMessage.trim();
+
+      if (editingMessage) {
+        // Edit mode
+        let updates: any = {};
+        if (sharedSecret) {
+          const encrypted = await encryptMessage(sharedSecret, text);
+          updates = { ...encrypted };
+        } else {
+          updates = { ciphertext: encodeFallback(text), iv: 'plain' };
+        }
+
+        const { data, error } = await updateMessage(editingMessage.id, updates);
+        if (error) {
+          toast.error('Gagal memperbarui pesan');
+          return;
+        }
+        if (data) {
+          setMessages(prev => prev.map(m => m.id === data.id ? { ...m, ...data, decrypted_content: text } : m));
+          setEditingMessage(null);
+          setNewMessage('');
+        }
+        return;
+      }
+
+      // Send mode (same as before)
 
       const expires_at = vanishMode
         ? new Date(Date.now() + vanishTimer * 1000).toISOString()
@@ -361,19 +393,38 @@ ${newMessage.trim()}`
       let payload: any;
       if (sharedSecret) {
         const encrypted = await encryptMessage(sharedSecret, text);
-        payload = { chat_id: chat.id, sender_id: userId, type: 'text', ...encrypted, expires_at };
+        payload = {
+          chat_id: chat.id,
+          sender_id: userId,
+          type: 'text',
+          ...encrypted,
+          expires_at,
+          reply_to_id: replyTo?.id || null
+        };
       } else {
-        // Fallback: base64 encode (no E2E encryption — used for group or missing key)
-        payload = { chat_id: chat.id, sender_id: userId, type: 'text', ciphertext: encodeFallback(text), iv: 'plain', expires_at };
+        payload = {
+          chat_id: chat.id,
+          sender_id: userId,
+          type: 'text',
+          ciphertext: encodeFallback(text),
+          iv: 'plain',
+          expires_at,
+          reply_to_id: replyTo?.id || null
+        };
       }
 
       const { data, error } = await sendMessage(payload);
-      if (error) { setSendError('Gagal mengirim pesan'); console.error('Send error:', error); return; }
+      if (error) {
+        toast.error('Gagal mengirim pesan: ' + error.message);
+        setSendError('Gagal mengirim pesan');
+        return;
+      }
       if (data) {
-        setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: text } as Message]);
+        setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: text, reply_to_message: replyTo } as Message]);
         setNewMessage('');
         setAiSuggestion(null);
         setReplyTo(null);
+        setTimeout(scrollToBottom, 100);
       }
     } catch (error) { console.error('Send error:', error); setSendError('Gagal mengirim pesan'); }
   };
@@ -391,6 +442,30 @@ ${newMessage.trim()}`
       const { data } = await sendMessage(payload);
       if (data) setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: audioBase64 } as Message]);
     } catch (error) { console.error('Voice error:', error); }
+  };
+
+  const handleDeleteMessage = async (messageId: string, forEveryone: boolean) => {
+    try {
+      const { error } = await deleteMessage(messageId, forEveryone);
+      if (error) {
+        toast.error('Gagal menghapus pesan');
+        return;
+      }
+      if (!forEveryone) {
+        setMessages(prev => prev.filter(m => m.id !== messageId));
+      }
+      toast.success('Pesan dihapus');
+    } catch (e) {
+      console.error('Delete error:', e);
+    }
+  };
+
+  const startEditing = (message: Message) => {
+    if (message.type !== 'text') return;
+    setEditingMessage(message);
+    setNewMessage(message.decrypted_content || '');
+    setReplyTo(null);
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -698,39 +773,11 @@ ${newMessage.trim()}`
           </div>
         )}
 
-        {/* Image Preview before send */}
-        {imagePreview && (
-          <div className="p-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-            <div className="relative inline-block">
-              {imagePreview.file.type.startsWith('video/') ? (
-                <video src={imagePreview.url} className="max-h-40 max-w-full rounded-2xl object-cover" />
-              ) : (
-                <img src={imagePreview.url} alt="preview" className="max-h-40 max-w-full rounded-2xl object-cover" />
-              )}
-              <button onClick={() => setImagePreview(null)} className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center">
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="flex gap-2 mt-2">
-              <Button variant="outline" size="sm" onClick={() => setImagePreview(null)}>Batal</Button>
-              <Button
-                size="sm"
-                className="bg-gradient-to-r from-pink-500 to-rose-500 text-white"
-                onClick={handleSendMedia}
-                disabled={isUploadingMedia}
-              >
-                {isUploadingMedia ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />
-                ) : <Send className="w-4 h-4 mr-1" />}
-                Kirim
-              </Button>
-            </div>
-          </div>
-        )}
+
 
         {/* Messages */}
-        <ScrollArea
-          className="flex-1 relative"
+        <div
+          className="flex-1 overflow-y-auto overflow-x-hidden relative"
           style={{
             backgroundImage: wallpaper ? `url(${wallpaper})` : 'none',
             backgroundSize: 'cover',
@@ -883,6 +930,28 @@ ${newMessage.trim()}`
                             <button onClick={() => setReplyTo(message)} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-muted-foreground/60">
                               <Reply className="w-3.5 h-3.5" />
                             </button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-muted-foreground/60">
+                                  <MoreVertical className="w-3.5 h-3.5" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align={isOwn ? 'end' : 'start'}>
+                                {isOwn && message.type === 'text' && (
+                                  <DropdownMenuItem onClick={() => startEditing(message)}>
+                                    <Sparkles className="w-4 h-4 mr-2" /> Edit Pesan
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem onClick={() => handleDeleteMessage(message.id, false)}>
+                                  <Trash2 className="w-4 h-4 mr-2" /> Hapus untuk Saya
+                                </DropdownMenuItem>
+                                {isOwn && (
+                                  <DropdownMenuItem onClick={() => handleDeleteMessage(message.id, true)} className="text-red-500">
+                                    <Trash2 className="w-4 h-4 mr-2" /> Hapus untuk Semua Orang
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
 
@@ -899,46 +968,90 @@ ${newMessage.trim()}`
                     </div>
                   );
                 })}
-                <div ref={scrollRef} />
+                <div ref={scrollRef} className="h-4" />
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Send Error */}
-        {sendError && (
-          <div className="px-4 py-1.5 bg-red-50 dark:bg-red-900/20 border-t border-red-100 dark:border-red-800 text-xs text-red-500 text-center">
-            {sendError}
-          </div>
-        )}
+        {
+          sendError && (
+            <div className="px-4 py-1.5 bg-red-50 dark:bg-red-900/20 border-t border-red-100 dark:border-red-800 text-xs text-red-500 text-center">
+              {sendError}
+            </div>
+          )
+        }
 
         {/* AI Suggestion */}
-        {aiSuggestion && (
-          <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/10 dark:to-pink-900/10 border-t border-purple-100 dark:border-purple-800 flex items-center gap-3">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <Sparkles className="w-4 h-4 text-purple-500 shrink-0" />
-              <button onClick={() => { setNewMessage(aiSuggestion); setAiSuggestion(null); }} className="text-xs text-purple-700 dark:text-purple-300 hover:underline text-left truncate italic">
-                " {aiSuggestion} "
-              </button>
+        {
+          aiSuggestion && (
+            <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/10 dark:to-pink-900/10 border-t border-purple-100 dark:border-purple-800 flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <Sparkles className="w-4 h-4 text-purple-500 shrink-0" />
+                <button onClick={() => { setNewMessage(aiSuggestion); setAiSuggestion(null); }} className="text-xs text-purple-700 dark:text-purple-300 hover:underline text-left truncate italic">
+                  " {aiSuggestion} "
+                </button>
+              </div>
+              <button onClick={() => setAiSuggestion(null)} className="p-1 hover:bg-white/50 rounded-full shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
             </div>
-            <button onClick={() => setAiSuggestion(null)} className="p-1 hover:bg-white/50 rounded-full shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
-          </div>
-        )}
-
-        {/* Reply Preview */}
-        {replyTo && (
-          <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center gap-3">
-            <div className="w-1 h-8 bg-pink-500 rounded-full shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold text-pink-500 uppercase">Membalas</p>
-              <p className="text-xs text-muted-foreground truncate">{replyTo.decrypted_content}</p>
-            </div>
-            <button onClick={() => setReplyTo(null)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full"><X className="w-4 h-4 text-muted-foreground" /></button>
-          </div>
-        )}
+          )
+        }
 
         {/* Input Area */}
-        <div className="p-3 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
+        <div className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 pb-safe sm:pb-3">
+          {/* Image Preview before send */}
+          {imagePreview && (
+            <div className="p-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+              <div className="relative inline-block">
+                {imagePreview.file.type.startsWith('video/') ? (
+                  <video src={imagePreview.url} className="max-h-40 max-w-full rounded-2xl object-cover" />
+                ) : (
+                  <img src={imagePreview.url} alt="Preview" className="max-h-40 max-w-full rounded-2xl object-cover border-2 border-pink-500" />
+                )}
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  className="absolute -top-2 -right-2 h-7 w-7 rounded-full shadow-lg"
+                  onClick={() => { URL.revokeObjectURL(imagePreview.url); setImagePreview(null); }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+                <Button
+                  onClick={handleSendMedia}
+                  disabled={isUploadingMedia}
+                  className="absolute bottom-2 right-2 bg-pink-500 hover:bg-pink-600 rounded-full h-10 w-10 flex items-center justify-center p-0"
+                >
+                  {isUploadingMedia ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send className="h-5 w-5" />}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Edit / Reply Preview Area */}
+          {(replyTo || editingMessage) && (
+            <div className="mx-2 mb-2 p-2 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl shadow-sm animate-in slide-in-from-bottom-2 duration-200">
+              <div className="flex items-center justify-between gap-2 border-l-4 border-pink-500 pl-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-pink-500 uppercase tracking-wider mb-0.5">
+                    {editingMessage ? 'Mengedit Pesan' : `Membalas ${replyTo?.sender?.display_name || 'Teman'}`}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate italic">
+                    {editingMessage ? editingMessage.decrypted_content : (replyTo?.type === 'deleted' ? 'Pesan telah dihapus' : replyTo?.decrypted_content || '[Media]')}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
+                  onClick={() => { setReplyTo(null); setEditingMessage(null); if (editingMessage) setNewMessage(''); }}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+
           {showEmojiPicker && (
             <div className="mb-2 p-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-xl max-w-full overflow-hidden">
               <div className="flex flex-wrap gap-1 justify-center">
@@ -1061,9 +1174,11 @@ ${newMessage.trim()}`
           )}
         </div>
 
-        {showCallModal && (
-          <CallModal chatId={chat.id} userId={userId} otherUser={otherUser} callType={callType} isIncoming={false} onClose={() => setShowCallModal(false)} />
-        )}
+        {
+          showCallModal && (
+            <CallModal chatId={chat.id} userId={userId} otherUser={otherUser} callType={callType} isIncoming={false} onClose={() => setShowCallModal(false)} />
+          )
+        }
 
         <CreatePollModal
           isOpen={showPollModal}
@@ -1247,5 +1362,3 @@ function LinkPreview({ url }: { url: string }) {
     return null;
   }
 }
-
-
