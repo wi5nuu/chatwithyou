@@ -121,58 +121,60 @@ export function AIChat({ onBack }: AIChatProps) {
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-500/10 rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-rose-500/10 rounded-full blur-[100px] pointer-events-none" />
 
-      {/* Header */}
-      <div className="p-4 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 z-20 flex items-center justify-between shadow-sm sticky top-0">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20">
-            <ChevronLeft className="h-6 w-6" />
-          </Button>
-          <div className="relative">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500 to-rose-500 flex items-center justify-center p-[2px] shadow-lg">
-              <div className="w-full h-full bg-white dark:bg-gray-900 rounded-[14px] flex items-center justify-center">
-                <Bot className="w-6 h-6 text-purple-500" />
+      {/* Header Container */}
+      <div className="sticky top-0 z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800 shadow-sm">
+        <div className="max-w-2xl mx-auto p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20">
+              <ChevronLeft className="h-6 w-6" />
+            </Button>
+            <div className="relative">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500 to-rose-500 flex items-center justify-center p-[2px] shadow-lg">
+                <div className="w-full h-full bg-white dark:bg-gray-900 rounded-[14px] flex items-center justify-center">
+                  <Bot className="w-6 h-6 text-purple-500" />
+                </div>
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white dark:border-gray-950 rounded-full flex items-center justify-center">
+                <Sparkles className="w-2 h-2 text-white animate-pulse" />
               </div>
             </div>
-            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white dark:border-gray-950 rounded-full flex items-center justify-center">
-              <Sparkles className="w-2 h-2 text-white animate-pulse" />
+            <div>
+              <h3 className="font-black text-sm tracking-tighter uppercase">LoveBot AI</h3>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest leading-none">
+                  Online
+                </span>
+              </div>
             </div>
           </div>
-          <div>
-            <h3 className="font-black text-sm tracking-tighter uppercase">LoveBot AI</h3>
-            <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest leading-none">
-                Online
-              </span>
-            </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/20 rounded-2xl border border-rose-100 dark:border-rose-800">
+            <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+            <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-tighter">Powered by Gemini</span>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/20 rounded-2xl border border-rose-100 dark:border-rose-800">
-          <Sparkles className="w-3.5 h-3.5 text-rose-500" />
-          <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-tighter">Powered by Gemini</span>
-        </div>
-      </div>
 
-      {/* Quick Actions - Floating Pill Design */}
-      <div className="px-4 py-3 z-20 flex gap-2 overflow-x-auto no-scrollbar">
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 rounded-full border-pink-200/50 dark:border-pink-800/50 bg-white/40 dark:bg-gray-900/40 backdrop-blur-md hover:bg-pink-500 hover:text-white transition-all duration-300 shadow-sm group"
-          onClick={getRomanticSuggestion}
-        >
-          <Heart className="w-3.5 h-3.5 mr-1.5 text-pink-500 group-hover:text-white transition-colors" />
-          <span className="text-xs font-semibold">Saran Romantis</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 rounded-full border-purple-200/50 dark:border-purple-800/50 bg-white/40 dark:bg-gray-900/40 backdrop-blur-md hover:bg-purple-500 hover:text-white transition-all duration-300 shadow-sm group"
-          onClick={getTip}
-        >
-          <Lightbulb className="w-3.5 h-3.5 mr-1.5 text-purple-500 group-hover:text-white transition-colors" />
-          <span className="text-xs font-semibold">Tips Hubungan</span>
-        </Button>
+        {/* Quick Actions moved inside the sticky area to prevent overlap */}
+        <div className="px-4 py-3 flex gap-2 overflow-x-auto no-scrollbar max-w-2xl mx-auto border-t border-gray-50 dark:border-gray-800/50">
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 rounded-full border-pink-200/50 dark:border-pink-800/50 bg-white/40 dark:bg-gray-900/40 backdrop-blur-md hover:bg-pink-500 hover:text-white transition-all duration-300 shadow-sm group"
+            onClick={getRomanticSuggestion}
+          >
+            <Heart className="w-3.5 h-3.5 mr-1.5 text-pink-500 group-hover:text-white transition-colors" />
+            <span className="text-xs font-semibold">Saran Romantis</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 rounded-full border-purple-200/50 dark:border-purple-800/50 bg-white/40 dark:bg-gray-900/40 backdrop-blur-md hover:bg-purple-500 hover:text-white transition-all duration-300 shadow-sm group"
+            onClick={getTip}
+          >
+            <Lightbulb className="w-3.5 h-3.5 mr-1.5 text-purple-500 group-hover:text-white transition-colors" />
+            <span className="text-xs font-semibold">Tips Hubungan</span>
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}
