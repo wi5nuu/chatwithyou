@@ -2,10 +2,7 @@ import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogFooter
+    DialogContent
 } from '@/components/ui/dialog';
 import {
     Heart,
@@ -13,10 +10,9 @@ import {
     Download,
     Award,
     ShieldCheck,
-    Calendar,
-    ChevronLeft
+    Calendar
 } from 'lucide-react';
-import type { Profile } from '@/types';
+// import type { Profile } from '@/types';
 
 interface CertificateGeneratorProps {
     open: boolean;

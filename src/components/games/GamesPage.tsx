@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Card } from '@/components/ui/card';
+// import { Card } from '@/components/ui/card';
 import {
-    Gamepad2,
     Heart,
     Trophy,
     ChevronLeft,
@@ -11,11 +10,10 @@ import {
     MessageSquare,
     Download,
     Flame,
-    Zap,
-    Gift
+    Zap
 } from 'lucide-react';
 import { supabase, getFriends } from '@/lib/supabase';
-import type { Chat, Profile } from '@/types';
+import type { Chat } from '@/types';
 import { toast } from 'sonner';
 import { LoveQuiz } from './LoveQuiz';
 import { WordGuess } from './WordGuess';
@@ -69,8 +67,8 @@ const GAMES: Game[] = [
 
 export function GamesPage({ userId, onBack }: GamesPageProps) {
     const [activePartnerChat, setActivePartnerChat] = useState<Chat | null>(null);
-    const [chats, setChats] = useState<Chat[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    // const [chats, setChats] = useState<Chat[]>([]);
+    // const [isLoading, setIsLoading] = useState(true);
     const [activeGameId, setActiveGameId] = useState<string | null>(null);
     const [showCertificate, setShowCertificate] = useState(false);
 
@@ -106,12 +104,12 @@ export function GamesPage({ userId, onBack }: GamesPageProps) {
                     friendIds.includes(otherParticipant.user_id);
             });
 
-            setChats(filtered as any);
+            // setChats(filtered as any);
             if (filtered.length > 0) setActivePartnerChat(filtered[0] as any);
         } catch (e) {
             console.error('Error loading chats for games:', e);
         } finally {
-            setIsLoading(false);
+            // setIsLoading(false);
         }
     };
 
