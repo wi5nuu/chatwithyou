@@ -137,11 +137,13 @@ export const getUserChats = async (userId: string) => {
         is_group,
         name,
         avatar_url,
+        wallpaper_url,
+        wallpaper_color,
         participants:chat_participants (
           user_id,
           profile:user_id (id, email, display_name, avatar_url, public_key, online, last_seen)
         ),
-        messages (id, type, ciphertext, iv, hash, created_at, sender_id, is_delivered, is_read)
+        messages (id, type, ciphertext, iv, hash, created_at, sender_id, is_delivered, is_read, poll_id)
       )
     `)
     .eq('user_id', userId);

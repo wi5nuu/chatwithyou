@@ -117,6 +117,9 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       // Handle normal updates (delivered, read, edited)
       return { ...m, ...updatedMsg };
     }));
+  }, (messageId) => {
+    // Handle physical deletion
+    setMessages((prev: Message[]) => prev.filter(m => m.id !== messageId));
   });
 
   // Keep other user's online status and profile info in sync
@@ -221,10 +224,14 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
-      setMessages(prev => prev.filter(msg => {
-        if (!msg.expires_at) return true;
-        return new Date(msg.expires_at) > now;
-      }));
+      setMessages(prev => {
+        const needsUpdate = prev.some(msg => msg.expires_at && new Date(msg.expires_at) <= now);
+        if (!needsUpdate) return prev;
+        return prev.filter(msg => {
+          if (!msg.expires_at) return true;
+          return new Date(msg.expires_at) > now;
+        });
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -234,7 +241,20 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
     if (chat.wallpaper_color) setWallpaperColor(chat.wallpaper_color);
   }, [chat.id, chat.wallpaper_url, chat.wallpaper_color]);
 
-  useEffect(() => { scrollToBottom(); }, [messages]);
+  useEffect(() => {
+    // Only scroll to bottom on initial load or when a new message is added
+    // If the last message is ours, always scroll. If it's theirs, scroll only if near bottom.
+    const container = scrollRef.current?.parentElement;
+    if (container) {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+      const lastMessage = messages[messages.length - 1];
+      const isOurs = lastMessage?.sender_id === userId;
+
+      if (messages.length > 0 && (isOurs || isNearBottom)) {
+        scrollToBottom();
+      }
+    }
+  }, [messages.length]); // Use .length to avoid triggers from content decryption/expiry unless count changes
 
   const initializeChat = async () => {
     try {

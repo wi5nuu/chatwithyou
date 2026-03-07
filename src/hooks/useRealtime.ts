@@ -5,7 +5,8 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 export function useRealtimeMessages(
   chatId: string | null,
   onMessage: (message: any) => void,
-  onUpdate?: (message: any) => void
+  onUpdate?: (message: any) => void,
+  onDelete?: (messageId: string) => void
 ) {
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -28,6 +29,8 @@ export function useRealtimeMessages(
             onMessage(payload.new);
           } else if (payload.eventType === 'UPDATE' && onUpdate) {
             onUpdate(payload.new);
+          } else if (payload.eventType === 'DELETE' && onDelete) {
+            onDelete(payload.old.id);
           }
         }
       )

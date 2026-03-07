@@ -188,6 +188,8 @@ function App() {
               is_group: chatObj.is_group,
               name: chatObj.name,
               avatar_url: chatObj.avatar_url,
+              wallpaper_url: chatObj.wallpaper_url,
+              wallpaper_color: chatObj.wallpaper_color,
               participants: chatObj.participants,
             } as Chat);
           }
