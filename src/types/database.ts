@@ -49,16 +49,22 @@ export interface Database {
           id: string
           created_at: string
           reset_at: string | null
+          game_level: number
+          game_stats: Json
         }
         Insert: {
           id?: string
           created_at?: string
           reset_at?: string | null
+          game_level?: number
+          game_stats?: Json
         }
         Update: {
           id?: string
           created_at?: string
           reset_at?: string | null
+          game_level?: number
+          game_stats?: Json
         }
         Relationships: []
       }
@@ -102,6 +108,8 @@ export interface Database {
           iv: string | null
           hash: string | null
           created_at: string
+          is_delivered: boolean | null
+          is_read: boolean | null
         }
         Insert: {
           id?: string
@@ -112,6 +120,8 @@ export interface Database {
           iv?: string | null
           hash?: string | null
           created_at?: string
+          is_delivered?: boolean | null
+          is_read?: boolean | null
         }
         Update: {
           id?: string
@@ -122,6 +132,8 @@ export interface Database {
           iv?: string | null
           hash?: string | null
           created_at?: string
+          is_delivered?: boolean | null
+          is_read?: boolean | null
         }
         Relationships: [
           {

@@ -8,68 +8,9 @@ interface UseAIReturn {
   analyzeSentiment: (text: string) => Promise<'positive' | 'negative' | 'neutral'>;
 }
 
-// Simple AI responses for LoveChat
-// In production, this would connect to an actual AI API
-const AI_RESPONSES: Record<string, string[]> = {
-  greeting: [
-    'Halo! Senang mendengar dari kamu! 😊',
-    'Hai sayang! Apa kabar?',
-    'Selamat datang! Ada yang bisa saya bantu?',
-  ],
-  love: [
-    'Aww, itu sangat manis! ❤️',
-    'Kamu selalu tahu cara membuatku tersenyum',
-    'Aku juga merasakan hal yang sama',
-    'Kamu adalah orang spesial bagiku',
-  ],
-  miss: [
-    'Aku juga kangen kamu 😢',
-    'Semoga kita bisa segera bertemu ya',
-    'Kangen banget sama kamu...',
-  ],
-  goodnight: [
-    'Selamat malam, mimpi indah! 🌙',
-    'Tidur yang nyenyak ya sayang',
-    'Good night! Besok kita ngobrol lagi',
-  ],
-  goodmorning: [
-    'Selamat pagi! Semangat hari ini! ☀️',
-    'Pagi sayang! Sudah sarapan?',
-    'Good morning! Hari ini akan menjadi hari yang indah',
-  ],
-  default: [
-    'Hmm, menarik! Ceritakan lebih banyak',
-    'Aku mengerti, lanjutkan...',
-    'Wah, seru juga ya!',
-    'Oh gitu, terus gimana?',
-    'Aku dengerin kamu kok',
-  ],
-};
 
-const KEYWORDS: Record<string, string[]> = {
-  greeting: ['halo', 'hai', 'hi', 'hello', 'hey'],
-  love: ['cinta', 'sayang', 'love', 'kangen', 'rindu', 'miss', '<3', '❤️'],
-  miss: ['kangen', 'rindu', 'miss you', 'kangen banget'],
-  goodnight: ['selamat malam', 'good night', 'tidur', 'mimpi indah'],
-  goodmorning: ['selamat pagi', 'good morning', 'pagi'],
-};
-
-function detectIntent(message: string): string {
-  const lowerMessage = message.toLowerCase();
-
-  for (const [intent, keywords] of Object.entries(KEYWORDS)) {
-    if (keywords.some(keyword => lowerMessage.includes(keyword))) {
-      return intent;
-    }
-  }
-
-  return 'default';
-}
-
-function getRandomResponse(intent: string): string {
-  const responses = AI_RESPONSES[intent] || AI_RESPONSES.default;
-  return responses[Math.floor(Math.random() * responses.length)];
-}
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY;
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
 
 export function useAI(): UseAIReturn {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -79,59 +20,70 @@ export function useAI(): UseAIReturn {
     message: string,
     context: string[] = []
   ): Promise<string> => {
+    if (!GEMINI_API_KEY) {
+      console.warn('Gemini API Key missing, using local fallback...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return "Maaf, aku sedang tidak bisa berpikir jernih. Coba lagi nanti ya sayang! ❤️";
+    }
+
     setIsProcessing(true);
     setError(null);
 
     try {
-      // 1. Try to call the Python Backend (Relative URL for Vercel)
-      const response = await fetch('/api/chat', {
+      const history = context.map(msg => ({
+        role: msg.startsWith('User:') ? 'user' : 'model',
+        parts: [{ text: msg.replace(/^(User|Model|Assistant): /, '') }]
+      }));
+
+      const response = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, context }),
+        body: JSON.stringify({
+          contents: [
+            ...history,
+            {
+              role: 'user',
+              parts: [{
+                text: `Kamu adalah LoveBot, asisten romantis LoveChat. 
+                Tugasmu: Memberikan saran hubungan, jawaban romantis, atau sekadar teman curhat.
+                ATURAN PENTING: 
+                1. Jawaban harus SANGAT SINGKAT (maksimal 2-3 kalimat).
+                2. Gunakan gaya bahasa yang hangat, perhatian, dan sedikit romantis.
+                3. Gunakan Bahasa Indonesia kecuali user bertanya dalam bahasa lain.
+                4. Jika user bertanya "siapa kamu", jelaskan singkat bahwa kamu LoveBot.
+                
+                Pesan user: ${message}`
+              }]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 150,
+          }
+        }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        return data.response;
-      }
+      if (!response.ok) throw new Error('API request failed');
 
-      // 2. Fallback to local logic if backend fails
-      throw new Error('Backend unavailable');
+      const data = await response.json();
+      return data.candidates[0].content.parts[0].text;
     } catch (err) {
-      console.warn('AI Backend not reachable, using local fallback...');
-
-      // Simulate AI processing delay for local fallback
-      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
-
-      const intent = detectIntent(message);
-      const response = getRandomResponse(intent);
-
-      return response;
+      console.error('AI API Error:', err);
+      return "Aku butuh waktu sebentar untuk merenung. Tanya lagi ya! ❤️";
     } finally {
       setIsProcessing(false);
     }
   }, []);
 
-  const suggestReply = useCallback(async (conversation: string[]): Promise<string> => {
+  const suggestReply = useCallback(async (_conversation: string[]): Promise<string> => {
     setIsProcessing(true);
     setError(null);
 
     try {
       await new Promise(resolve => setTimeout(resolve, 800));
-
-      const lastMessage = conversation[conversation.length - 1] || '';
-      const intent = detectIntent(lastMessage);
-
-      const suggestions: Record<string, string> = {
-        greeting: 'Halo juga! Apa kabar?',
-        love: 'Aww, kamu juga sayang ❤️',
-        miss: 'Aku juga kangen kamu 😢',
-        goodnight: 'Selamat malam, mimpi indah!',
-        goodmorning: 'Selamat pagi! Semangat ya!',
-        default: 'Ooh, menarik! Ceritain lebih banyak dong',
-      };
-
-      return suggestions[intent] || suggestions.default;
+      return 'Wah, menarik banget! Ceritain lebih banyak dong... 😊';
     } catch (err: any) {
       setError(err.message || 'Failed to suggest reply');
       return '';

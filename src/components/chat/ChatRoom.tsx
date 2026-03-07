@@ -6,12 +6,22 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone, Video, MoreVertical, Send, Mic, Play, Pause,
   ChevronLeft, Sparkles, Lock, SmilePlus, Reply, CheckCheck, X, Users, Paperclip, Plus,
-  Ghost, Image as ImageIcon, Trash2, BarChart2, MapPin, ExternalLink
+  Ghost, Image as ImageIcon, Trash2, BarChart2, MapPin, ExternalLink, User, Gamepad2
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getMessages, sendMessage, getOtherParticipant, uploadImage, uploadVideo, createPoll, markMessagesAsRead, supabase } from '@/lib/supabase';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  getMessages, sendMessage, getOtherParticipant, uploadImage, uploadVideo,
+  createPoll, markMessagesAsRead, markMessagesAsDelivered, supabase,
+  addMessageReaction, clearChat, checkFriendship, sendFriendRequest
+} from '@/lib/supabase';
 import { useRealtimeMessages, useTypingIndicator, useRealtimeProfile } from '@/hooks/useRealtime';
 import { useVoiceRecorder, useVoicePlayer } from '@/hooks/useVoiceRecorder';
 import { useAI } from '@/hooks/useAI';
@@ -55,6 +65,12 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const [showPollModal, setShowPollModal] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [currentResetAt, setCurrentResetAt] = useState<string | null>(chat.reset_at || null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showWallpaperDialog, setShowWallpaperDialog] = useState(false);
+  const [wallpaperUrlInput, setWallpaperUrlInput] = useState('');
+  const [showNotFriendDialog, setShowNotFriendDialog] = useState(false);
+  const [isFriend, setIsFriend] = useState<boolean | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -86,8 +102,72 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   });
 
   useEffect(() => {
+    if (chat.id) {
+      loadReactions();
+      checkFriendStatus();
+    }
+  }, [chat.id, userId]);
+
+  const checkFriendStatus = async () => {
+    if (chat.is_group) return;
+    const { isFriend: friend } = await checkFriendship(userId, otherUser?.id || '');
+    setIsFriend(friend);
+  };
+
+  // Real-time reactions
+  useEffect(() => {
+    if (!chat.id) return;
+    const channel = supabase
+      .channel(`reactions_realtime:${chat.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (payload) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const newReaction = payload.new;
+          // Verify if this reaction belongs to a message in our current chat
+          // (Simplification: we trust the channel or filtered if possible)
+          setReactions(prev => ({ ...prev, [newReaction.message_id]: newReaction.user_id === userId ? newReaction.emoji : prev[newReaction.message_id] }));
+          // Actually, we'll just reload reactions for simplicity to handle multiple users correctly
+          loadReactions();
+        } else if (payload.eventType === 'DELETE') {
+          loadReactions();
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [chat.id, userId]);
+
+  const loadReactions = async () => {
+    if (!chat.id) return;
+    try {
+      // Get reactions for messages in this chat using a join
+      const { data, error } = await (supabase as any)
+        .from('message_reactions')
+        .select('message_id, user_id, emoji, messages!inner(chat_id)')
+        .eq('messages.chat_id', chat.id);
+
+      if (error) {
+        console.error('Error loading reactions from DB:', error.message);
+        return;
+      }
+
+      if (data) {
+        const reactionMap: Record<string, string> = {};
+        data.forEach((r: any) => {
+          if (r.user_id === userId || !reactionMap[r.message_id]) {
+            reactionMap[r.message_id] = r.emoji;
+          }
+        });
+        setReactions(reactionMap);
+      }
+    } catch (e) {
+      console.error('Catch error in loadReactions:', e);
+    }
+  };
+
+  useEffect(() => {
     if (chat.id && userId) {
       markMessagesAsRead(chat.id, userId);
+      markMessagesAsDelivered(chat.id, userId);
     }
   }, [chat.id, userId, messages.length]);
 
@@ -186,6 +266,47 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       }
     } catch (error) { console.error('Error initializing chat:', error); }
     finally { setIsLoading(false); }
+  };
+
+  const handleClearChat = async () => {
+    if (!chat.id) return;
+
+    try {
+      const { error } = await clearChat(chat.id);
+      if (error) {
+        toast.error('Gagal membersihkan chat');
+        return;
+      }
+
+      const now = new Date().toISOString();
+      setCurrentResetAt(now);
+      setMessages([]);
+      toast.success('Riwayat chat berhasil dibersihkan');
+    } catch (e) {
+      console.error('Error clearing chat:', e);
+      toast.error('Terjadi kesalahan');
+    } finally {
+      setShowClearConfirm(false);
+    }
+  };
+
+  const handleOpenGames = () => {
+    if (isFriend) {
+      (window as any).dispatchEvent(new CustomEvent('open-games', { detail: { chatId: chat.id } }));
+    } else {
+      setShowNotFriendDialog(true);
+    }
+  };
+
+  const handleAddFriend = async () => {
+    if (!otherUser) return;
+    const { error } = await sendFriendRequest(userId, otherUser.id);
+    if (error) {
+      toast.error('Gagal mengirim permintaan pertemanan');
+    } else {
+      toast.success('Permintaan pertemanan dikirim! ✨');
+      setShowNotFriendDialog(false);
+    }
   };
 
   const decryptAndAddMessage = async (message: any) => {
@@ -387,9 +508,34 @@ ${newMessage.trim()}`
 
   const scrollToBottom = () => scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  const handleAddReaction = (messageId: string, emoji: string) => {
-    setReactions(prev => ({ ...prev, [messageId]: prev[messageId] === emoji ? '' : emoji }));
+  const handleAddReaction = async (messageId: string, emoji: string) => {
+    const isRemove = reactions[messageId] === emoji;
+    const targetEmoji = isRemove ? '' : emoji;
+
+    // Update locally for immediate feedback
+    setReactions(prev => ({ ...prev, [messageId]: targetEmoji }));
     setReactionMenuId(null);
+
+    // Persist to DB
+    try {
+      const { error } = await addMessageReaction(messageId, userId, targetEmoji);
+      if (error) {
+        console.error('Supabase error persisting reaction:', error.message, error.code);
+        // Provide more descriptive error for the user to troubleshoot
+        if (error.code === '42P01') {
+          toast.error('Tabel reaksi belum dibuat. Mohon jalankan SQL script bagian 11.');
+        } else if (error.code === '42703') {
+          toast.error('Ada kolom database yang kurang. Mohon perbarui tabel reaksi.');
+        } else {
+          toast.error(`Gagal: ${error.message || 'Error server'}`);
+        }
+        // Rollback local state if failed
+        setReactions(prev => ({ ...prev, [messageId]: isRemove ? emoji : '' }));
+      }
+    } catch (e: any) {
+      console.error('Failed to persist reaction:', e);
+      toast.error('Terjadi kesalahan koneksi');
+    }
   };
 
   const handleEmojiInsert = (emoji: string) => {
@@ -402,484 +548,675 @@ ${newMessage.trim()}`
   const formatTime = (d: string) => new Date(d).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   const formatDuration = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
+  const isActuallyOnline = (profile: any) => {
+    if (!profile?.online) return false;
+    if (!profile?.last_seen) return false;
+    const lastSeen = new Date(profile.last_seen).getTime();
+    const now = new Date().getTime();
+    return (now - lastSeen) < 120000; // 2 Minutes timeout
+  };
+
+  const userOnline = isActuallyOnline(otherUser);
+
   const chatTitle = chat.is_group
-    ? chat.name || 'Grup'
-    : otherUser?.display_name || otherUser?.email || 'Loading...';
+    ? (chat.name || 'Grup Tanpa Nama')
+    : (otherUser?.display_name || otherUser?.email?.split('@')[0] || 'Loading...');
   const chatAvatarUrl = chat.is_group ? chat.avatar_url : otherUser?.avatar_url;
 
   const isMedia = (msg: Message) => msg.type === 'image' || msg.type === 'video';
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950">
-      {/* Header */}
-      <div className="p-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-3 shadow-sm">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          {isMobile && (
-            <Button variant="ghost" size="icon" onClick={onBack} className="shrink-0">
-              <ChevronLeft className="h-5 w-5" />
-            </Button>
-          )}
-          <div className="relative shrink-0">
-            <Avatar className="w-10 h-10">
-              <AvatarImage src={chatAvatarUrl || undefined} />
-              <AvatarFallback className="bg-gradient-to-br from-pink-500 to-rose-500 text-white text-sm font-bold">
-                {chat.is_group ? <Users className="w-4 h-4" /> : getInitials(chatTitle)}
-              </AvatarFallback>
-            </Avatar>
-            {!chat.is_group && otherUser?.online && (
-              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full" />
-            )}
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <p className="font-semibold text-sm truncate">{chatTitle}</p>
-              {sharedSecret && (
-                <div className="flex items-center gap-0.5 text-[9px] font-black text-green-600 dark:text-green-500 bg-green-50 dark:bg-green-900/20 px-1 rounded border border-green-200/50 uppercase tracking-tighter">
-                  <Lock className="w-2 h-2" /> E2EE
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {isTyping ? (
-                <span className="text-xs text-pink-500 flex items-center gap-1">
-                  <span className="flex gap-0.5">
-                    {[0, 150, 300].map(d => <span key={d} className="w-1 h-1 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}
-                  </span> Mengetik
-                </span>
-              ) : !chat.is_group && otherUser?.online ? (
-                <p className="text-xs text-green-500 font-semibold">● Online</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {chat.is_group ? `${chat.participants?.length || 0} anggota` : `Terakhir dilihat ${otherUser?.last_seen ? formatTime(otherUser.last_seen) : ''}`}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {!chat.is_group && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={`transition-colors ${vanishMode ? 'text-pink-500 bg-pink-50' : 'text-gray-500'}`}
-                >
-                  <Ghost className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => { setVanishMode(true); setVanishTimer(60); }}>Vanish Mode (1 Menit)</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { setVanishMode(true); setVanishTimer(3600); }}>Vanish Mode (1 Jam)</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setVanishMode(false)} className="text-red-500">Matikan Vanish Mode</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
-          {/* On Desktop: Show call icons directly. On Mobile: Hide them if space is low or group them */}
-          {!isMobile && (
-            <>
-              <Button variant="ghost" size="icon" onClick={() => { setCallType('voice'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/40 rounded-full transition-all active:scale-95">
-                <Phone className="h-4 w-4" />
+    <>
+      <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950">
+        {/* Header */}
+        <div className="p-2 sm:p-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-2 sm:gap-3 shadow-sm">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isMobile && (
+              <Button variant="ghost" size="icon" onClick={onBack} className="shrink-0">
+                <ChevronLeft className="h-5 w-5" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => { setCallType('video'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/40 rounded-full transition-all active:scale-95">
-                <Video className="h-4 w-4" />
-              </Button>
-            </>
-          )}
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {isMobile && (
-                <>
-                  <DropdownMenuItem onClick={() => { setCallType('voice'); setShowCallModal(true); }}>
-                    <Phone className="w-4 h-4 mr-2" /> Telepon Suara
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setCallType('video'); setShowCallModal(true); }}>
-                    <Video className="w-4 h-4 mr-2" /> Video Call
-                  </DropdownMenuItem>
-                </>
-              )}
-              <DropdownMenuItem onClick={() => {
-                const url = prompt('Masukkan URL gambar wallpaper (atau biarkan kosong untuk default):');
-                if (url !== null) {
-                  setWallpaper(url || null);
-                  if (url) localStorage.setItem(`wallpaper_${chat.id}`, url);
-                  else localStorage.removeItem(`wallpaper_${chat.id}`);
-                }
-              }}>
-                <ImageIcon className="w-4 h-4 mr-2" /> Ganti Wallpaper
-              </DropdownMenuItem>
-              <DropdownMenuItem>Lihat Profil</DropdownMenuItem>
-              <DropdownMenuItem>Bersihkan Chat</DropdownMenuItem>
-              {!chat.is_group && <DropdownMenuItem className="text-red-500">Blokir</DropdownMenuItem>}
-              {chat.is_group && <DropdownMenuItem className="text-red-500">Keluar Grup</DropdownMenuItem>}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      {/* Vanish Mode Status Bar */}
-      {vanishMode && (
-        <div className="bg-pink-500 text-white text-[10px] py-1 px-4 flex items-center justify-center gap-2 animate-in slide-in-from-top duration-300 font-bold uppercase tracking-widest">
-          <Ghost className="w-3 h-3 animate-pulse" />
-          <span>Vanish Mode Aktif ({vanishTimer === 60 ? '1 Menit' : '1 Jam'}) — Pesan akan menghilang setelah dibaca</span>
-        </div>
-      )}
-
-      {/* Image Preview before send */}
-      {imagePreview && (
-        <div className="p-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-          <div className="relative inline-block">
-            {imagePreview.file.type.startsWith('video/') ? (
-              <video src={imagePreview.url} className="max-h-40 max-w-full rounded-2xl object-cover" />
-            ) : (
-              <img src={imagePreview.url} alt="preview" className="max-h-40 max-w-full rounded-2xl object-cover" />
             )}
-            <button onClick={() => setImagePreview(null)} className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center">
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-          <div className="flex gap-2 mt-2">
-            <Button variant="outline" size="sm" onClick={() => setImagePreview(null)}>Batal</Button>
-            <Button
-              size="sm"
-              className="bg-gradient-to-r from-pink-500 to-rose-500 text-white"
-              onClick={handleSendMedia}
-              disabled={isUploadingMedia}
-            >
-              {isUploadingMedia ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />
-              ) : <Send className="w-4 h-4 mr-1" />}
-              Kirim
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Messages */}
-      <ScrollArea
-        className="flex-1 relative"
-        style={{
-          backgroundImage: wallpaper ? `url(${wallpaper})` : 'none',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        {wallpaper && <div className="absolute inset-0 bg-white/60 dark:bg-gray-950/60 pointer-events-none" />}
-        <div className="relative p-4">
-          {isLoading ? (
-            <div className="space-y-4">
-              {[1, 2, 3].map(i => (
-                <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
-                  <div className="w-2/3 h-14 bg-gray-200 dark:bg-gray-800 rounded-2xl animate-pulse" />
-                </div>
-              ))}
+            <div className="relative shrink-0">
+              <Avatar className="w-10 h-10">
+                <AvatarImage src={chatAvatarUrl || undefined} />
+                <AvatarFallback className="bg-gradient-to-br from-pink-500 to-rose-500 text-white text-sm font-bold">
+                  {chat.is_group ? <Users className="w-4 h-4" /> : getInitials(chatTitle)}
+                </AvatarFallback>
+              </Avatar>
+              {!chat.is_group && userOnline && (
+                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full animate-pulse" />
+              )}
             </div>
-          ) : messages.length === 0 ? (
-            <div className="flex-1 min-h-[400px] flex flex-col items-center justify-center text-center p-8">
-              <div className="w-16 h-16 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center mb-4 shadow-lg shadow-pink-500/20">
-                <Lock className="w-8 h-8 text-white" />
-              </div>
-              <h3 className="font-semibold mb-2">Pesan Terenkripsi</h3>
-              <p className="text-sm text-muted-foreground max-w-xs">
-                Hanya kamu dan {chatTitle} yang bisa membaca pesan ini.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {messages.map((message, index) => {
-                const isOwn = message.sender_id === userId;
-                const showAvatar = index === 0 || messages[index - 1].sender_id !== message.sender_id;
-                const hasReaction = reactions[message.id];
-                const isMediaMsg = isMedia(message);
-                const sender = message.sender as any;
-
-                return (
-                  <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} items-end gap-2 group`}>
-                    {!isOwn && (
-                      <div className="w-8 shrink-0">
-                        {showAvatar && (
-                          <Avatar className="w-8 h-8 border border-gray-100 dark:border-gray-800">
-                            <AvatarImage src={sender?.avatar_url || ''} />
-                            <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-500 text-white text-[10px] font-bold">
-                              {getInitials(sender?.display_name || sender?.email || 'U')}
-                            </AvatarFallback>
-                          </Avatar>
-                        )}
-                      </div>
-                    )}
-
-                    <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%]`}>
-                      {chat.is_group && !isOwn && showAvatar && (
-                        <p className="text-[10px] text-pink-500 font-bold mb-1 ml-1">
-                          {sender?.display_name || sender?.email?.split('@')[0] || 'User'}
-                        </p>
-                      )}
-
-                      <div className={`relative flex flex-col ${isOwn ? 'items-end' : 'items-start'} group/msg`}>
-                        {message.expires_at && (
-                          <div className={`flex items-center gap-1.5 mb-1 px-2 py-0.5 rounded-full bg-pink-100/50 dark:bg-pink-900/20 text-[9px] font-bold uppercase tracking-wider ${isOwn ? 'text-pink-600' : 'text-pink-500'} border border-pink-200/50 dark:border-pink-800/50 animate-pulse`}>
-                            <Ghost className="w-2.5 h-2.5" />
-                            <span>Menghilang: {Math.max(1, Math.ceil((new Date(message.expires_at).getTime() - Date.now()) / 1000 / 60))}m</span>
-                          </div>
-                        )}
-
-                        <div className={`px-4 py-2.5 rounded-2xl relative shadow-md transition-all duration-300 hover:shadow-lg ${isOwn
-                          ? isMediaMsg ? 'bg-transparent p-0' : 'bg-gradient-to-br from-pink-500 via-rose-500 to-rose-600 text-white rounded-br-none shadow-pink-500/20 hover:scale-[1.01]'
-                          : isMediaMsg ? 'bg-transparent p-0' : 'bg-white/80 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-bl-none backdrop-blur-sm lg:hover:scale-[1.01]'
-                          }`}>
-                          {message.type === 'image' ? (
-                            <img
-                              src={message.decrypted_content || ''}
-                              alt="Foto"
-                              className="max-w-full max-h-[200px] sm:max-h-[300px] rounded-xl object-cover cursor-pointer hover:opacity-95 transition-opacity"
-                              onClick={() => window.open(message.decrypted_content || '', '_blank')}
-                            />
-                          ) : message.type === 'video' ? (
-                            <video
-                              src={message.decrypted_content || ''}
-                              controls
-                              className="max-w-full max-h-[200px] sm:max-h-[300px] rounded-xl"
-                            />
-                          ) : message.type === 'voice' ? (
-                            <div className="flex items-center gap-2 py-1 min-w-[150px]">
-                              <Button variant="ghost" size="icon" className={`w-8 h-8 rounded-full ${isOwn ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-100 text-pink-500'}`}
-                                onClick={() => isPlaying ? pauseAudio() : message.decrypted_content && playAudio(message.decrypted_content)}>
-                                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                              </Button>
-                              <div className="flex-1">
-                                <div className={`h-1.5 rounded-full ${isOwn ? 'bg-white/30' : 'bg-gray-200 dark:bg-gray-700'}`}>
-                                  <div className={`h-full rounded-full ${isOwn ? 'bg-white' : 'bg-pink-500'}`} style={{ width: `${isPlaying ? (currentTime / duration) * 100 : 0}%` }} />
-                                </div>
-                              </div>
-                            </div>
-                          ) : message.type === 'poll' ? (
-                            <PollMessage poll={message.poll!} userId={userId} />
-                          ) : message.type === 'location' ? (
-                            <div className="flex flex-col gap-2 min-w-[200px]">
-                              <div className="bg-gray-100 dark:bg-gray-700 rounded-xl overflow-hidden cursor-pointer"
-                                onClick={() => window.open(`https://www.google.com/maps?q=${message.location?.lat},${message.location?.lng}`, '_blank')}>
-                                <div className="h-24 bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center relative">
-                                  <MapPin className="w-8 h-8 text-pink-500 animate-bounce" />
-                                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
-                                </div>
-                                <div className="p-2 text-[10px] font-medium text-gray-600 dark:text-gray-300">
-                                  Lihat Lokasi Saya di Google Maps
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col gap-2">
-                              {message.decrypted_content?.match(/https?:\/\/[^\s]+/) && (
-                                <LinkPreview url={message.decrypted_content!.match(/https?:\/\/[^\s]+/)![0]} />
-                              )}
-                              <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.decrypted_content || '[Encrypted]'}</p>
-                            </div>
-                          )}
-
-                          {/* Reactions */}
-                          {hasReaction && (
-                            <div className="absolute -bottom-2 -right-2 flex">
-                              <span className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-full px-1.5 py-0.5 text-[12px] shadow-md scale-90">
-                                {hasReaction}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className={`flex items-center gap-1.5 mt-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
-                        <p className="text-[10px] text-muted-foreground/70 font-medium">{formatTime(message.created_at)}</p>
-                        {isOwn && <CheckCheck className={`w-3 h-3 ${message.is_read ? 'text-pink-500' : (message.expires_at ? 'text-pink-400' : 'text-blue-400')}`} />}
-
-                        {/* Hover actions */}
-                        <div className={`flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isOwn ? 'flex-row-reverse' : ''}`}>
-                          <button onClick={() => setReactionMenuId(reactionMenuId === message.id ? null : message.id)} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-muted-foreground/60">
-                            <SmilePlus className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => setReplyTo(message)} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-muted-foreground/60">
-                            <Reply className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {reactionMenuId === message.id && (
-                        <div className="flex gap-1 mt-1 p-1 bg-white dark:bg-gray-800 rounded-full shadow-xl border border-gray-100 dark:border-gray-700 z-10">
-                          {EMOJI_REACTIONS.map(emoji => (
-                            <button key={emoji} onClick={() => handleAddReaction(message.id, emoji)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-125 transition-transform">
-                              {emoji}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <p className="font-semibold text-sm truncate">{chatTitle}</p>
+                {sharedSecret && (
+                  <div className="flex items-center gap-0.5 text-[9px] font-black text-green-600 dark:text-green-500 bg-green-50 dark:bg-green-900/20 px-1 rounded border border-green-200/50 uppercase tracking-tighter">
+                    <Lock className="w-2 h-2" /> E2EE
                   </div>
-                );
-              })}
-              <div ref={scrollRef} />
-            </div>
-          )}
-        </div>
-      </ScrollArea>
-
-      {/* Send Error */}
-      {sendError && (
-        <div className="px-4 py-1.5 bg-red-50 dark:bg-red-900/20 border-t border-red-100 dark:border-red-800 text-xs text-red-500 text-center">
-          {sendError}
-        </div>
-      )}
-
-      {/* AI Suggestion */}
-      {aiSuggestion && (
-        <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/10 dark:to-pink-900/10 border-t border-purple-100 dark:border-purple-800 flex items-center gap-3">
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <Sparkles className="w-4 h-4 text-purple-500 shrink-0" />
-            <button onClick={() => { setNewMessage(aiSuggestion); setAiSuggestion(null); }} className="text-xs text-purple-700 dark:text-purple-300 hover:underline text-left truncate italic">
-              " {aiSuggestion} "
-            </button>
-          </div>
-          <button onClick={() => setAiSuggestion(null)} className="p-1 hover:bg-white/50 rounded-full shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
-        </div>
-      )}
-
-      {/* Reply Preview */}
-      {replyTo && (
-        <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center gap-3">
-          <div className="w-1 h-8 bg-pink-500 rounded-full shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold text-pink-500 uppercase">Membalas</p>
-            <p className="text-xs text-muted-foreground truncate">{replyTo.decrypted_content}</p>
-          </div>
-          <button onClick={() => setReplyTo(null)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full"><X className="w-4 h-4 text-muted-foreground" /></button>
-        </div>
-      )}
-
-      {/* Input Area */}
-      <div className="p-3 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
-        {showEmojiPicker && (
-          <div className="mb-2 p-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-xl max-w-full overflow-hidden">
-            <div className="flex flex-wrap gap-1 justify-center">
-              {EMOJI_PICKER_LIST.map(emoji => (
-                <button key={emoji} onClick={() => handleEmojiInsert(emoji)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-xl hover:scale-125 transition-transform">
-                  {emoji}
-                </button>
-              ))}
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {isTyping ? (
+                  <span className="text-xs text-pink-500 flex items-center gap-1">
+                    <span className="flex gap-0.5">
+                      {[0, 150, 300].map(d => <span key={d} className="w-1 h-1 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}
+                    </span> Mengetik
+                  </span>
+                ) : !chat.is_group && userOnline ? (
+                  <p className="text-xs text-green-500 font-semibold uppercase tracking-wider animate-pulse">● Online</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">
+                    {chat.is_group ? `${chat.participants?.length || 0} anggota` : `Terakhir dilihat ${otherUser?.last_seen ? formatTime(otherUser.last_seen) : 'lama sekali'}`}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
-        )}
-
-        {isRecording ? (
-          <div className="flex items-center justify-between bg-pink-50 dark:bg-pink-900/20 rounded-full px-4 py-2 border border-pink-200 dark:border-pink-800 animate-in slide-in-from-bottom-2 duration-200">
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
-              <span className="text-sm font-bold text-pink-600 dark:text-pink-400 tracking-tight">VOICE RECORDING {formatDuration(recordingTime)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-pink-100 dark:hover:bg-pink-900/40" onClick={cancelRecording}>
-                <Trash2 className="w-4 h-4 text-pink-500" />
-              </Button>
-              <Button size="icon" className="w-9 h-9 bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-full shadow-lg shadow-pink-500/20" onClick={() => { stopRecording(); setTimeout(handleSendVoice, 500); }}>
-                <Send className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1 sm:gap-2">
-            {!isMobile ? (
-              <>
-                <Button variant="ghost" size="icon" className={`shrink-0 w-10 h-10 rounded-full transition-colors ${showEmojiPicker ? 'text-pink-500 bg-pink-50 dark:bg-pink-900/20' : 'text-gray-400 hover:text-pink-500'}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-                  <SmilePlus className="w-5 h-5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={() => setShowPollModal(true)}>
-                  <BarChart2 className="w-5 h-5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={handleShareLocation}>
-                  <MapPin className="w-5 h-5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={() => fileInputRef.current?.click()}>
-                  <Paperclip className="w-5 h-5" />
-                </Button>
-              </>
-            ) : (
+          <div className="flex items-center gap-1 shrink-0">
+            {!chat.is_group && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500">
-                    <Plus className="w-5 h-5" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`transition-colors ${vanishMode ? 'text-pink-500 bg-pink-50' : 'text-gray-500'}`}
+                  >
+                    <Ghost className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="mb-2">
-                  <DropdownMenuItem onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-                    <SmilePlus className="w-4 h-4 mr-2" /> Emoji
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
-                    <Paperclip className="w-4 h-4 mr-2" /> Media/File
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setShowPollModal(true)}>
-                    <BarChart2 className="w-4 h-4 mr-2" /> Polling
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleShareLocation}>
-                    <MapPin className="w-4 h-4 mr-2" /> Lokasi
-                  </DropdownMenuItem>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => { setVanishMode(true); setVanishTimer(60); }}>Vanish Mode (1 Menit)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setVanishMode(true); setVanishTimer(3600); }}>Vanish Mode (1 Jam)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setVanishMode(false)} className="text-red-500">Matikan Vanish Mode</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
 
-            <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleFileSelect} />
-            <div className="flex-1 relative group">
-              <Input
-                ref={inputRef}
-                placeholder={vanishMode ? "Ketik pesan rahasia..." : "Ketik pesan..."}
-                value={newMessage}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                className={`w-full rounded-2xl bg-gray-100 dark:bg-gray-800 border-none px-4 py-2.5 focus:ring-2 transition-all text-sm ${vanishMode ? 'focus:ring-pink-500/30' : 'focus:ring-pink-500/20'}`}
-              />
-              {vanishMode && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <Ghost className="w-4 h-4 text-pink-500 animate-pulse" />
-                </div>
-              )}
-            </div>
-            {newMessage.trim() === '' ? (
-              <Button variant="ghost" size="icon" className="shrink-0 w-10 h-10 rounded-full text-gray-400 hover:text-pink-500" onClick={startRecording}>
-                <Mic className="w-5 h-5" />
-              </Button>
-            ) : (
-              <Button onClick={handleSendMessage} size="icon"
-                className="shrink-0 w-10 h-10 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white rounded-full shadow-lg shadow-pink-500/20 transition-all active:scale-90">
-                <Send className="w-5 h-5" />
-              </Button>
+            {/* On Desktop: Show call icons directly. On Mobile: Hide them if space is low or group them */}
+            {!isMobile && (
+              <>
+                <Button variant="ghost" size="icon" onClick={() => { setCallType('voice'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/40 rounded-full transition-all active:scale-95">
+                  <Phone className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => { setCallType('video'); setShowCallModal(true); }} className="text-gray-500 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-900/40 rounded-full transition-all active:scale-95">
+                  <Video className="h-4 w-4" />
+                </Button>
+              </>
             )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {isMobile && (
+                  <>
+                    <DropdownMenuItem onClick={() => { setCallType('voice'); setShowCallModal(true); }}>
+                      <Phone className="w-4 h-4 mr-2" /> Telepon Suara
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setCallType('video'); setShowCallModal(true); }}>
+                      <Video className="w-4 h-4 mr-2" /> Video Call
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuItem onClick={() => {
+                  setWallpaperUrlInput(wallpaper || '');
+                  setShowWallpaperDialog(true);
+                }}>
+                  <ImageIcon className="w-4 h-4 mr-2" /> Ganti Wallpaper
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowProfileModal(true)}>
+                  <User className="w-4 h-4 mr-2" /> Lihat Profil
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowClearConfirm(true)}>
+                  <Trash2 className="w-4 h-4 mr-2" /> Bersihkan Chat
+                </DropdownMenuItem>
+                {!chat.is_group && <DropdownMenuItem className="text-red-500">Blokir</DropdownMenuItem>}
+                {chat.is_group && <DropdownMenuItem className="text-red-500">Keluar Grup</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {/* Vanish Mode Status Bar */}
+        {vanishMode && (
+          <div className="bg-pink-500 text-white text-[10px] py-1 px-4 flex items-center justify-center gap-2 animate-in slide-in-from-top duration-300 font-bold uppercase tracking-widest">
+            <Ghost className="w-3 h-3 animate-pulse" />
+            <span>Vanish Mode Aktif ({vanishTimer === 60 ? '1 Menit' : '1 Jam'}) — Pesan akan menghilang setelah dibaca</span>
           </div>
         )}
+
+        {/* Image Preview before send */}
+        {imagePreview && (
+          <div className="p-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+            <div className="relative inline-block">
+              {imagePreview.file.type.startsWith('video/') ? (
+                <video src={imagePreview.url} className="max-h-40 max-w-full rounded-2xl object-cover" />
+              ) : (
+                <img src={imagePreview.url} alt="preview" className="max-h-40 max-w-full rounded-2xl object-cover" />
+              )}
+              <button onClick={() => setImagePreview(null)} className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="flex gap-2 mt-2">
+              <Button variant="outline" size="sm" onClick={() => setImagePreview(null)}>Batal</Button>
+              <Button
+                size="sm"
+                className="bg-gradient-to-r from-pink-500 to-rose-500 text-white"
+                onClick={handleSendMedia}
+                disabled={isUploadingMedia}
+              >
+                {isUploadingMedia ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />
+                ) : <Send className="w-4 h-4 mr-1" />}
+                Kirim
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Messages */}
+        <ScrollArea
+          className="flex-1 relative"
+          style={{
+            backgroundImage: wallpaper ? `url(${wallpaper})` : 'none',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat'
+          }}
+        >
+          {wallpaper && <div className="absolute inset-0 bg-white/60 dark:bg-gray-950/60 pointer-events-none" />}
+          <div className="relative p-4">
+            {isLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
+                    <div className="w-2/3 h-14 bg-gray-200 dark:bg-gray-800 rounded-2xl animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="flex-1 min-h-[400px] flex flex-col items-center justify-center text-center p-8">
+                <div className="w-16 h-16 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center mb-4 shadow-lg shadow-pink-500/20">
+                  <Lock className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="font-semibold mb-2">Pesan Terenkripsi</h3>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  Hanya kamu dan {chatTitle} yang bisa membaca pesan ini.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {messages.map((message, index) => {
+                  const isOwn = message.sender_id === userId;
+                  const showAvatar = index === 0 || messages[index - 1].sender_id !== message.sender_id;
+                  const hasReaction = reactions[message.id];
+                  const isMediaMsg = isMedia(message);
+                  const sender = message.sender as any;
+
+                  return (
+                    <div key={message.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} items-end gap-2 group`}>
+                      {!isOwn && (
+                        <div className="w-8 shrink-0">
+                          {showAvatar && (
+                            <Avatar className="w-8 h-8 border border-gray-100 dark:border-gray-800">
+                              <AvatarImage src={sender?.avatar_url || ''} />
+                              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-500 text-white text-[10px] font-bold">
+                                {getInitials(sender?.display_name || sender?.email || 'U')}
+                              </AvatarFallback>
+                            </Avatar>
+                          )}
+                        </div>
+                      )}
+
+                      <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%]`}>
+                        {chat.is_group && !isOwn && showAvatar && (
+                          <p className="text-[10px] text-pink-500 font-bold mb-1 ml-1">
+                            {sender?.display_name || sender?.email?.split('@')[0] || 'User'}
+                          </p>
+                        )}
+
+                        <div className={`relative flex flex-col ${isOwn ? 'items-end' : 'items-start'} group/msg`}>
+                          {message.expires_at && (
+                            <div className={`flex items-center gap-1.5 mb-1 px-2 py-0.5 rounded-full bg-pink-100/50 dark:bg-pink-900/20 text-[9px] font-bold uppercase tracking-wider ${isOwn ? 'text-pink-600' : 'text-pink-500'} border border-pink-200/50 dark:border-pink-800/50 animate-pulse`}>
+                              <Ghost className="w-2.5 h-2.5" />
+                              <span>Menghilang: {Math.max(1, Math.ceil((new Date(message.expires_at).getTime() - Date.now()) / 1000 / 60))}m</span>
+                            </div>
+                          )}
+
+                          <div className={`px-4 py-2.5 rounded-2xl relative shadow-md transition-all duration-300 hover:shadow-lg ${isOwn
+                            ? isMediaMsg ? 'bg-transparent p-0' : 'bg-gradient-to-br from-pink-500 via-rose-500 to-rose-600 text-white rounded-br-none shadow-pink-500/20 hover:scale-[1.01]'
+                            : isMediaMsg ? 'bg-transparent p-0' : 'bg-white/80 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-bl-none backdrop-blur-sm lg:hover:scale-[1.01]'
+                            }`}>
+                            {message.type === 'image' ? (
+                              <img
+                                src={message.decrypted_content || ''}
+                                alt="Foto"
+                                className="max-w-full max-h-[200px] sm:max-h-[300px] rounded-xl object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                                onClick={() => window.open(message.decrypted_content || '', '_blank')}
+                              />
+                            ) : message.type === 'video' ? (
+                              <video
+                                src={message.decrypted_content || ''}
+                                controls
+                                className="max-w-full max-h-[200px] sm:max-h-[300px] rounded-xl"
+                              />
+                            ) : message.type === 'voice' ? (
+                              <div className="flex items-center gap-2 py-1 min-w-[150px]">
+                                <Button variant="ghost" size="icon" className={`w-8 h-8 rounded-full ${isOwn ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-100 text-pink-500'}`}
+                                  onClick={() => isPlaying ? pauseAudio() : message.decrypted_content && playAudio(message.decrypted_content)}>
+                                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                </Button>
+                                <div className="flex-1">
+                                  <div className={`h-1.5 rounded-full ${isOwn ? 'bg-white/30' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                                    <div className={`h-full rounded-full ${isOwn ? 'bg-white' : 'bg-pink-500'}`} style={{ width: `${isPlaying ? (currentTime / duration) * 100 : 0}%` }} />
+                                  </div>
+                                </div>
+                              </div>
+                            ) : message.type === 'poll' ? (
+                              <PollMessage poll={message.poll!} userId={userId} />
+                            ) : message.type === 'location' ? (
+                              <div className="flex flex-col gap-2 min-w-[200px]">
+                                <div className="bg-gray-100 dark:bg-gray-700 rounded-xl overflow-hidden cursor-pointer"
+                                  onClick={() => window.open(`https://www.google.com/maps?q=${message.location?.lat},${message.location?.lng}`, '_blank')}>
+                                  <div className="h-24 bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center relative">
+                                    <MapPin className="w-8 h-8 text-pink-500 animate-bounce" />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                                  </div>
+                                  <div className="p-2 text-[10px] font-medium text-gray-600 dark:text-gray-300">
+                                    Lihat Lokasi Saya di Google Maps
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-2">
+                                {message.decrypted_content?.match(/https?:\/\/[^\s]+/) && (
+                                  <LinkPreview url={message.decrypted_content!.match(/https?:\/\/[^\s]+/)![0]} />
+                                )}
+                                <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.decrypted_content || '[Encrypted]'}</p>
+                              </div>
+                            )}
+
+                            {/* Reactions */}
+                            {hasReaction && (
+                              <div className="absolute -bottom-2 -right-2 flex">
+                                <span className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-full px-1.5 py-0.5 text-[12px] shadow-md scale-90">
+                                  {hasReaction}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className={`flex items-center gap-1.5 mt-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
+                          <p className="text-[10px] text-muted-foreground/70 font-medium">{formatTime(message.created_at)}</p>
+                          {isOwn && (
+                            <div className="flex items-center">
+                              {message.is_read ? (
+                                <CheckCheck className="w-3.5 h-3.5 text-pink-500 animate-in zoom-in duration-300" />
+                              ) : message.is_delivered ? (
+                                <CheckCheck className="w-3.5 h-3.5 text-blue-400" />
+                              ) : (
+                                <Send className="w-2.5 h-2.5 text-gray-400" />
+                              )}
+                            </div>
+                          )}
+
+                          {/* Hover actions */}
+                          <div className={`flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isOwn ? 'flex-row-reverse' : ''}`}>
+                            <button onClick={() => setReactionMenuId(reactionMenuId === message.id ? null : message.id)} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-muted-foreground/60">
+                              <SmilePlus className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => setReplyTo(message)} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-muted-foreground/60">
+                              <Reply className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {reactionMenuId === message.id && (
+                          <div className="flex gap-1 mt-1 p-1 bg-white dark:bg-gray-800 rounded-full shadow-xl border border-gray-100 dark:border-gray-700 z-10">
+                            {EMOJI_REACTIONS.map(emoji => (
+                              <button key={emoji} onClick={() => handleAddReaction(message.id, emoji)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-125 transition-transform">
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={scrollRef} />
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+
+        {/* Send Error */}
+        {sendError && (
+          <div className="px-4 py-1.5 bg-red-50 dark:bg-red-900/20 border-t border-red-100 dark:border-red-800 text-xs text-red-500 text-center">
+            {sendError}
+          </div>
+        )}
+
+        {/* AI Suggestion */}
+        {aiSuggestion && (
+          <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/10 dark:to-pink-900/10 border-t border-purple-100 dark:border-purple-800 flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <Sparkles className="w-4 h-4 text-purple-500 shrink-0" />
+              <button onClick={() => { setNewMessage(aiSuggestion); setAiSuggestion(null); }} className="text-xs text-purple-700 dark:text-purple-300 hover:underline text-left truncate italic">
+                " {aiSuggestion} "
+              </button>
+            </div>
+            <button onClick={() => setAiSuggestion(null)} className="p-1 hover:bg-white/50 rounded-full shrink-0"><X className="w-3.5 h-3.5 text-muted-foreground" /></button>
+          </div>
+        )}
+
+        {/* Reply Preview */}
+        {replyTo && (
+          <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center gap-3">
+            <div className="w-1 h-8 bg-pink-500 rounded-full shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-pink-500 uppercase">Membalas</p>
+              <p className="text-xs text-muted-foreground truncate">{replyTo.decrypted_content}</p>
+            </div>
+            <button onClick={() => setReplyTo(null)} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full"><X className="w-4 h-4 text-muted-foreground" /></button>
+          </div>
+        )}
+
+        {/* Input Area */}
+        <div className="p-3 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
+          {showEmojiPicker && (
+            <div className="mb-2 p-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-xl max-w-full overflow-hidden">
+              <div className="flex flex-wrap gap-1 justify-center">
+                {EMOJI_PICKER_LIST.map(emoji => (
+                  <button key={emoji} onClick={() => handleEmojiInsert(emoji)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-xl hover:scale-125 transition-transform">
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isRecording ? (
+            <div className="flex items-center justify-between bg-pink-50 dark:bg-pink-900/20 rounded-full px-4 py-2 border border-pink-200 dark:border-pink-800 animate-in slide-in-from-bottom-2 duration-200">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+                <span className="text-sm font-bold text-pink-600 dark:text-pink-400 tracking-tight">VOICE RECORDING {formatDuration(recordingTime)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-pink-100 dark:hover:bg-pink-900/40" onClick={cancelRecording}>
+                  <Trash2 className="w-4 h-4 text-pink-500" />
+                </Button>
+                <Button size="icon" className="w-9 h-9 bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-full shadow-lg shadow-pink-500/20" onClick={() => { stopRecording(); setTimeout(handleSendVoice, 500); }}>
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 sm:gap-2">
+              {!isMobile ? (
+                <>
+                  <button
+                    className={`shrink-0 w-8 h-8 flex items-center justify-center transition-colors ${showEmojiPicker ? 'text-rose-500' : 'text-gray-400 hover:text-rose-500 active:text-rose-600'}`}
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  >
+                    <SmilePlus className="w-5 h-5 transition-transform active:scale-110" />
+                  </button>
+                  <button
+                    className="shrink-0 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 active:text-rose-600 transition-colors"
+                    onClick={() => setShowPollModal(true)}
+                  >
+                    <BarChart2 className="w-5 h-5 transition-transform active:scale-110" />
+                  </button>
+                  <button
+                    className="shrink-0 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 active:text-rose-600 transition-colors"
+                    onClick={handleShareLocation}
+                  >
+                    <MapPin className="w-5 h-5 transition-transform active:scale-110" />
+                  </button>
+                  <button
+                    className="shrink-0 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 active:text-rose-600 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Paperclip className="w-5 h-5 transition-transform active:scale-110" />
+                  </button>
+                  <button
+                    className="shrink-0 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 active:text-rose-600 transition-colors"
+                    onClick={handleOpenGames}
+                  >
+                    <Gamepad2 className="w-5 h-5 transition-transform active:scale-110" />
+                  </button>
+                </>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="shrink-0 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-pink-500">
+                      <Plus className="w-5 h-5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="mb-2">
+                    <DropdownMenuItem onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+                      <SmilePlus className="w-4 h-4 mr-2" /> Emoji
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+                      <Paperclip className="w-4 h-4 mr-2" /> Media/File
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setShowPollModal(true)}>
+                      <BarChart2 className="w-4 h-4 mr-2" /> Polling
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleShareLocation}>
+                      <MapPin className="w-4 h-4 mr-2" /> Lokasi
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleOpenGames} className="text-rose-600 dark:text-rose-400 font-bold">
+                      <Gamepad2 className="w-4 h-4 mr-2" /> Main Game Bareng
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+
+              <input ref={fileInputRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleFileSelect} />
+              <div className="flex-1 relative group">
+                <Input
+                  ref={inputRef}
+                  placeholder={vanishMode ? "Ketik pesan rahasia..." : "Ketik pesan..."}
+                  value={newMessage}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  className={`w-full rounded-2xl bg-gray-100 dark:bg-gray-800 border-none px-4 py-2.5 focus:ring-2 transition-all text-sm ${vanishMode ? 'focus:ring-pink-500/30' : 'focus:ring-pink-500/20'}`}
+                />
+                {vanishMode && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Ghost className="w-4 h-4 text-pink-500 animate-pulse" />
+                  </div>
+                )}
+              </div>
+              {newMessage.trim() === '' ? (
+                <button
+                  className="shrink-0 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 active:text-rose-600 transition-colors"
+                  onClick={startRecording}
+                >
+                  <Mic className="w-5 h-5" />
+                </button>
+              ) : (
+                <Button onClick={handleSendMessage} size="icon"
+                  className="shrink-0 w-10 h-10 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white rounded-full shadow-lg shadow-pink-500/20 transition-all active:scale-90">
+                  <Send className="w-5 h-5" />
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {showCallModal && (
+          <CallModal chatId={chat.id} userId={userId} otherUser={otherUser} callType={callType} isIncoming={false} onClose={() => setShowCallModal(false)} />
+        )}
+
+        <CreatePollModal
+          isOpen={showPollModal}
+          onClose={() => setShowPollModal(false)}
+          onCreated={async (question, options, allowMultiple) => {
+            try {
+              const { data, error } = await createPoll({
+                chat_id: chat.id,
+                creator_id: userId,
+                question,
+                multiple_choice: allowMultiple,
+                options
+              });
+              if (data && !error) {
+                setMessages((prev: Message[]) => [...prev, data as Message]);
+              }
+            } catch (e) {
+              console.error('Error creating poll:', e);
+              toast.error('Gagal membuat polling');
+            }
+          }}
+        />
+
+        <Dialog open={showProfileModal} onOpenChange={setShowProfileModal}>
+          <DialogContent className="max-w-xs p-0 overflow-hidden rounded-3xl border-none">
+            <div className="relative h-32 bg-gradient-to-br from-pink-500 to-rose-500">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute top-2 right-2 text-white/70 hover:text-white hover:bg-white/10"
+                onClick={() => setShowProfileModal(false)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="px-6 pb-8 text-center -mt-12">
+              <Avatar className="w-24 h-24 border-4 border-white dark:border-gray-900 mx-auto shadow-xl">
+                <AvatarImage src={chatAvatarUrl || undefined} />
+                <AvatarFallback className="bg-gray-100 text-pink-500 text-2xl font-bold">
+                  {getInitials(chatTitle)}
+                </AvatarFallback>
+              </Avatar>
+              <h3 className="mt-4 text-xl font-bold">{chatTitle}</h3>
+              {!chat.is_group && (
+                <p className="text-xs text-muted-foreground font-medium mb-4">{otherUser?.email}</p>
+              )}
+              <div className="flex justify-center gap-2 mb-6">
+                <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${userOnline ? 'bg-green-50 text-green-600 border-green-200 animate-pulse' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+                  {userOnline ? 'Online' : 'Offline'}
+                </div>
+                {sharedSecret && (
+                  <div className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-pink-50 text-pink-600 border border-pink-200 flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5" /> Enkripsi Aktif
+                  </div>
+                )}
+              </div>
+
+              <p className="text-sm text-muted-foreground italic line-clamp-3 mb-6">
+                {otherUser?.bio || (chat.is_group ? "Grup chat LoveChat" : "Belum ada bio.")}
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  variant="outline"
+                  className="rounded-xl border-gray-200 font-bold text-xs"
+                  onClick={() => { setCallType('voice'); setShowCallModal(true); setShowProfileModal(false); }}
+                >
+                  <Phone className="w-3.5 h-3.5 mr-2 text-pink-500" /> Telepon
+                </Button>
+                <Button
+                  variant="outline"
+                  className="rounded-xl border-gray-200 font-bold text-xs"
+                  onClick={() => { setCallType('video'); setShowCallModal(true); setShowProfileModal(false); }}
+                >
+                  <Video className="w-3.5 h-3.5 mr-2 text-rose-500" /> Video
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+          <AlertDialogContent className="rounded-3xl max-w-[320px]">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-center">Bersihkan Chat?</AlertDialogTitle>
+              <AlertDialogDescription className="text-center text-xs">
+                Seluruh riwayat pesan di obrolan ini akan dihapus secara permanen dari layar Anda.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-col gap-2 sm:flex-col">
+              <AlertDialogAction
+                onClick={handleClearChat}
+                className="w-full bg-red-500 hover:bg-red-600 rounded-xl font-bold"
+              >
+                Hapus Sekarang
+              </AlertDialogAction>
+              <AlertDialogCancel className="w-full rounded-xl border-none font-bold text-muted-foreground">
+                Batal
+              </AlertDialogCancel>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <Dialog open={showWallpaperDialog} onOpenChange={setShowWallpaperDialog}>
+          <DialogContent className="max-w-[340px] p-6 rounded-3xl">
+            <DialogHeader>
+              <DialogTitle className="text-lg">Kustomisasi Chat</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">URL Gambar Wallpaper</label>
+                <Input
+                  placeholder="https://example.com/image.jpg"
+                  value={wallpaperUrlInput}
+                  onChange={(e) => setWallpaperUrlInput(e.target.value)}
+                  className="rounded-xl border-gray-100 dark:border-gray-800 focus:ring-pink-500"
+                />
+                <p className="text-[10px] text-muted-foreground">Biarkan kosong untuk kembali ke wallpaper default.</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                className="w-full bg-gradient-to-r from-pink-500 to-rose-500 rounded-xl font-bold py-6 shadow-lg shadow-pink-500/20"
+                onClick={() => {
+                  const url = wallpaperUrlInput.trim();
+                  setWallpaper(url || null);
+                  if (url) localStorage.setItem(`wallpaper_${chat.id}`, url);
+                  else localStorage.removeItem(`wallpaper_${chat.id}`);
+                  setShowWallpaperDialog(false);
+                  toast.success('Wallpaper diperbarui! ✨');
+                }}
+              >
+                Simpan Perubahan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={showNotFriendDialog} onOpenChange={setShowNotFriendDialog}>
+          <DialogContent className="max-w-xs rounded-[2rem] p-6 text-center border-none overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-rose-400 to-pink-500" />
+            <div className="space-y-6 pt-4">
+              <div className="w-16 h-16 bg-rose-50 dark:bg-rose-900/20 rounded-2xl flex items-center justify-center mx-auto">
+                <User className="w-8 h-8 text-rose-500" />
+              </div>
+              <div className="space-y-2">
+                <DialogTitle className="text-xl font-black text-gray-800 dark:text-white uppercase tracking-tighter">Belum Berteman!</DialogTitle>
+                <p className="text-xs text-muted-foreground font-medium leading-relaxed">
+                  Kalian harus saling berteman dan menyimpan kontak untuk bisa bermain game bersama.
+                </p>
+              </div>
+              <Button
+                onClick={handleAddFriend}
+                className="w-full bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-xl py-6 font-bold shadow-lg shadow-rose-500/20"
+              >
+                Tambah Teman
+              </Button>
+              <button onClick={() => setShowNotFriendDialog(false)} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest hover:text-gray-600 transition-colors">
+                Nanti Saja
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
-
-      {showCallModal && (
-        <CallModal chatId={chat.id} userId={userId} otherUser={otherUser} callType={callType} isIncoming={false} onClose={() => setShowCallModal(false)} />
-      )}
-
-      <CreatePollModal
-        isOpen={showPollModal}
-        onClose={() => setShowPollModal(false)}
-        onCreated={async (question, options, allowMultiple) => {
-          const { data, error } = await createPoll({
-            chat_id: chat.id,
-            creator_id: userId,
-            question,
-            multiple_choice: allowMultiple,
-            options
-          });
-          if (data && !error) {
-            setMessages((prev: Message[]) => [...prev, data as Message]);
-          }
-        }}
-      />
-    </div>
+    </>
   );
 }
 

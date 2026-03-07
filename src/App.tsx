@@ -10,6 +10,8 @@ import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { LandingPage } from '@/components/landing/LandingPage';
 import { CallModal } from '@/components/call/CallModal';
+import { GamesPage } from '@/components/games/GamesPage';
+import { SettingsPage } from '@/components/settings/SettingsPage';
 import { getCurrentUser, supabase, getProfile } from '@/lib/supabase';
 import { useOnlineStatus } from '@/hooks/useRealtime';
 import type { Chat, Profile } from '@/types';
@@ -24,6 +26,8 @@ function App() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [showAIChat, setShowAIChat] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showGames, setShowGames] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [activeCall, setActiveCall] = useState<any>(null);
@@ -130,24 +134,54 @@ function App() {
     setSelectedChat(chat);
     setShowAIChat(false);
     setShowProfile(false);
+    setShowGames(false);
   };
 
   const handleOpenAIChat = () => {
     setShowAIChat(true);
     setSelectedChat(null);
     setShowProfile(false);
+    setShowGames(false);
   };
 
   const handleOpenProfile = () => {
     setShowProfile(true);
     setSelectedChat(null);
     setShowAIChat(false);
+    setShowGames(false);
+    setShowSettings(false);
   };
+
+  const handleOpenSettings = () => {
+    setShowSettings(true);
+    setShowProfile(false);
+    setSelectedChat(null);
+    setShowAIChat(false);
+    setShowGames(false);
+  };
+
+  const handleOpenGames = (chatId?: string) => {
+    setShowGames(true);
+    setSelectedChat(null);
+    setShowAIChat(false);
+    setShowProfile(false);
+    if (chatId) console.log('Opening games for partner chat:', chatId);
+  };
+
+  useEffect(() => {
+    const handleOpenFromChat = (e: any) => {
+      handleOpenGames(e.detail.chatId);
+    };
+    window.addEventListener('open-games', handleOpenFromChat);
+    return () => window.removeEventListener('open-games', handleOpenFromChat);
+  }, []);
 
   const handleBack = () => {
     setSelectedChat(null);
     setShowAIChat(false);
     setShowProfile(false);
+    setShowGames(false);
+    setShowSettings(false);
   };
 
   if (isLoading) {
@@ -217,8 +251,8 @@ function App() {
     );
   }
 
-  const showSidebar = !isMobile || (!selectedChat && !showAIChat && !showProfile);
-  const showMain = !isMobile || selectedChat || showAIChat || showProfile;
+  const showSidebar = !isMobile || (!selectedChat && !showAIChat && !showProfile && !showGames && !showSettings);
+  const showMain = !isMobile || selectedChat || showAIChat || showProfile || showGames || showSettings;
 
   return (
     <main className="h-screen flex bg-gray-50 dark:bg-gray-950">
@@ -236,6 +270,8 @@ function App() {
             onToggleDarkMode={() => setDarkMode(d => !d)}
             onOpenAIChat={handleOpenAIChat}
             onOpenProfile={handleOpenProfile}
+            onOpenGames={handleOpenGames}
+            onOpenSettings={handleOpenSettings}
           />
         </div>
       )}
@@ -260,7 +296,23 @@ function App() {
               onProfileUpdated={() => loadUserProfile(user.id)}
             />
           )}
-          {selectedChat && !showProfile && (
+
+          {showGames && (
+            <GamesPage
+              userId={user.id}
+              onBack={handleBack}
+            />
+          )}
+
+          {showSettings && (
+            <SettingsPage
+              userId={user.id}
+              userEmail={user.email}
+              onBack={handleBack}
+            />
+          )}
+
+          {selectedChat && !showProfile && !showGames && !showSettings && (
             <ChatRoom
               chat={selectedChat}
               userId={user.id}
@@ -269,15 +321,14 @@ function App() {
               isMobile={isMobile}
             />
           )}
-          {showAIChat && !showProfile && (
+          {showAIChat && !showProfile && !showSettings && (
             <AIChat
               userId={user.id}
               userEmail={user.email}
               onBack={handleBack}
-              isMobile={isMobile}
             />
           )}
-          {!isMobile && !selectedChat && !showAIChat && !showProfile && (
+          {!isMobile && !selectedChat && !showAIChat && !showProfile && !showSettings && (
             <div className="flex-1 h-full flex items-center justify-center bg-gray-50 dark:bg-gray-950">
               <div className="text-center p-8">
                 <div className="w-24 h-24 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">

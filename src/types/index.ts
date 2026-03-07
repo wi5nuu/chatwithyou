@@ -24,6 +24,8 @@ export interface Chat {
   participants?: ChatParticipant[];
   last_message?: Message;
   unread_count?: number;
+  game_level?: number;
+  game_stats?: any;
 }
 
 export interface ChatParticipant {
@@ -49,6 +51,7 @@ export interface Message {
   is_ai?: boolean;
   poll?: Poll;
   location?: { lat: number; lng: number; address?: string };
+  is_delivered?: boolean;
   is_read?: boolean;
 }
 

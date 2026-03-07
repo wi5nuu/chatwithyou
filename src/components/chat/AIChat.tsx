@@ -9,7 +9,6 @@ interface AIChatProps {
   userId: string;
   userEmail: string;
   onBack?: () => void;
-  isMobile?: boolean;
 }
 
 interface AIMessage {
@@ -20,7 +19,7 @@ interface AIMessage {
   type?: 'text' | 'suggestion' | 'tip';
 }
 
-export function AIChat({ onBack, isMobile }: AIChatProps) {
+export function AIChat({ onBack }: AIChatProps) {
   const [messages, setMessages] = useState<AIMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -123,13 +122,11 @@ export function AIChat({ onBack, isMobile }: AIChatProps) {
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-rose-500/10 rounded-full blur-[100px] pointer-events-none" />
 
       {/* Header */}
-      <div className="p-4 glass-card border-b border-white/20 z-20 flex items-center justify-between shadow-sm">
+      <div className="p-4 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 z-20 flex items-center justify-between shadow-sm sticky top-0">
         <div className="flex items-center gap-3">
-          {isMobile && (
-            <Button variant="ghost" size="icon" onClick={onBack} className="hover:bg-rose-50 dark:hover:bg-rose-900/20">
-              <ChevronLeft className="h-5 w-5" />
-            </Button>
-          )}
+          <Button variant="ghost" size="icon" onClick={onBack} className="rounded-full hover:bg-rose-50 dark:hover:bg-rose-900/20">
+            <ChevronLeft className="h-6 w-6" />
+          </Button>
           <div className="relative">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500 to-rose-500 flex items-center justify-center p-[2px] shadow-lg">
               <div className="w-full h-full bg-white dark:bg-gray-900 rounded-[14px] flex items-center justify-center">
@@ -141,18 +138,18 @@ export function AIChat({ onBack, isMobile }: AIChatProps) {
             </div>
           </div>
           <div>
-            <h3 className="font-bold text-sm tracking-tight">{AI_PERSONALITY.name} 2.0</h3>
+            <h3 className="font-black text-sm tracking-tighter uppercase">LoveBot AI</h3>
             <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">
-                AI Intelligence Active
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest leading-none">
+                Online
               </span>
             </div>
           </div>
         </div>
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-white/50 dark:bg-white/5 rounded-full border border-white/20">
-          <Sparkles className="w-3 h-3 text-rose-500" />
-          <span className="text-[10px] font-bold text-rose-500 uppercase tracking-tighter">Powered by Gemini</span>
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/20 rounded-2xl border border-rose-100 dark:border-rose-800">
+          <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+          <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-tighter">Powered by Gemini</span>
         </div>
       </div>
 

@@ -1,23 +1,40 @@
 import { useState, useEffect } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Plus } from 'lucide-react';
-import { getActiveStatuses, createStatus, uploadImage } from '@/lib/supabase';
+import { getActiveStatuses, createStatus, uploadImage, deleteExpiredStatuses, supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/ToastProvider';
 import type { Status } from '@/types';
 
 interface StatusBarProps {
     userId: string;
+    userAvatar?: string | null;
+    userDisplayName?: string | null;
     onViewStatus: (statuses: Status[], startIndex: number) => void;
 }
 
-export function StatusBar({ userId, onViewStatus }: StatusBarProps) {
+export function StatusBar({ userId, userAvatar, userDisplayName, onViewStatus }: StatusBarProps) {
     const [allStatuses, setAllStatuses] = useState<Status[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const { showToast } = useToast();
 
     useEffect(() => {
-        loadStatuses();
-    }, []);
+        const init = async () => {
+            if (userId) await deleteExpiredStatuses(userId);
+            await loadStatuses();
+        };
+        init();
+
+        const channel = supabase
+            .channel('public:statuses')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'statuses' }, () => {
+                loadStatuses();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [userId]);
 
     const loadStatuses = async () => {
         const { data } = await getActiveStatuses();
@@ -71,30 +88,34 @@ export function StatusBar({ userId, onViewStatus }: StatusBarProps) {
         <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
             <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-1">
                 {/* My Status */}
-                <label className="flex flex-col items-center gap-1.5 cursor-pointer shrink-0 group">
+                <div className="flex flex-col items-center gap-1.5 shrink-0 group">
                     <div className="relative">
-                        <div className={`w-14 h-14 rounded-full p-0.5 ${myStatuses.length > 0 ? 'bg-gradient-to-br from-pink-500 to-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                        <button
+                            onClick={() => myStatuses.length > 0 && onViewStatus(myStatuses, 0)}
+                            className={`w-14 h-14 rounded-full p-0.5 ${myStatuses.length > 0 ? 'bg-gradient-to-br from-pink-500 to-rose-500' : 'bg-gray-200 dark:bg-gray-700'} hover:scale-105 transition-transform`}
+                        >
                             <div className="w-full h-full rounded-full bg-white dark:bg-gray-900 flex items-center justify-center overflow-hidden">
                                 <Avatar className="w-12 h-12">
+                                    <AvatarImage src={userAvatar || undefined} />
                                     <AvatarFallback className="bg-gradient-to-br from-pink-400 to-rose-400 text-white text-sm font-bold">
-                                        {getInitials(userId)}
+                                        {getInitials(userDisplayName || '??')}
                                     </AvatarFallback>
                                 </Avatar>
                             </div>
-                        </div>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-900">
+                        </button>
+                        <label className="absolute -bottom-0.5 -right-0.5 w-6 h-6 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-900 cursor-pointer hover:scale-110 transition-transform">
                             {isUploading ? (
-                                <div className="w-2.5 h-2.5 border border-white border-t-transparent rounded-full animate-spin" />
+                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
                             ) : (
-                                <Plus className="w-2.5 h-2.5 text-white" />
+                                <Plus className="w-3.5 h-3.5 text-white" />
                             )}
-                        </div>
+                            <input type="file" accept="image/*,video/*" className="hidden" onChange={handleAddStatus} disabled={isUploading} />
+                        </label>
                     </div>
                     <span className="text-[10px] text-center font-semibold text-gray-600 dark:text-gray-400 truncate w-14">
                         Status Saya
                     </span>
-                    <input type="file" accept="image/*,video/*" className="hidden" onChange={handleAddStatus} disabled={isUploading} />
-                </label>
+                </div>
 
                 {/* Others' Statuses */}
                 {othersStatuses.map((statuses) => {

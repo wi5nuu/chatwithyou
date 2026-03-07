@@ -91,6 +91,20 @@
   body {
     padding-bottom: env(safe-area-inset-bottom);
     overscroll-behavior-y: none;
+    -webkit-user-select: none;
+    /* Disable text selection for native feel */
+    user-select: none;
+  }
+
+  /* Prevent gray flash on click in mobile */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Custom scrollbars hidden but scrollable for APK feel */
+  ::-webkit-scrollbar {
+    width: 0px;
+    background: transparent;
   }
 
   @keyframes blob {
@@ -195,5 +209,22 @@
 
   .animate-bounce-slow {
     animation: bounce 3s infinite;
+  }
+
+  /* Safe Area Utilities */
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .h-safe-top {
+    height: env(safe-area-inset-top);
+  }
+
+  .h-safe-bottom {
+    height: env(safe-area-inset-bottom);
   }
 }

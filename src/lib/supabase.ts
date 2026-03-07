@@ -177,6 +177,14 @@ export const createGroupChat = async (name: string, participantIds: string[], cr
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
+export const clearChat = async (chatId: string) => {
+  const { error } = await supabase
+    .from('chats')
+    .update({ reset_at: new Date().toISOString() })
+    .eq('id', chatId);
+  return { error };
+};
+
 export const getMessages = async (chatId: string, resetAt?: string | null) => {
   let query = supabase
     .from('messages')
@@ -199,13 +207,24 @@ export const sendMessage = async (message: {
   iv?: string;
   hash?: string;
   expires_at?: string | null;
+  is_delivered?: boolean;
 }) => {
   const { data, error } = await supabase
     .from('messages')
-    .insert(message)
+    .insert({ ...message, is_delivered: message.is_delivered || false })
     .select()
     .single();
   return { data, error };
+};
+
+export const markMessagesAsDelivered = async (chatId: string, userId: string) => {
+  const { error } = await (supabase as any)
+    .from('messages')
+    .update({ is_delivered: true })
+    .eq('chat_id', chatId)
+    .neq('sender_id', userId)
+    .eq('is_delivered', false);
+  return { error };
 };
 
 export const markMessagesAsRead = async (chatId: string, userId: string) => {
@@ -232,13 +251,59 @@ export const getOtherParticipant = async (chatId: string, userId: string) => {
 // Using (supabase as any) because 'statuses' table is not in the generated Database type yet
 
 export const createStatus = async (userId: string, content: string, mediaUrl?: string, mediaType = 'text'): Promise<{ data: any; error: any }> => {
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + 24);
+
   const { data, error } = await (supabase as any)
     .from('statuses')
-    .insert({ user_id: userId, content, media_url: mediaUrl || null, media_type: mediaType })
+    .insert({
+      user_id: userId,
+      content,
+      media_url: mediaUrl || null,
+      media_type: mediaType,
+      expires_at: expiresAt.toISOString()
+    })
     .select()
     .single();
   if (error) console.error('createStatus DB error:', JSON.stringify(error));
   return { data, error };
+};
+
+export const deleteExpiredStatuses = async (userId: string) => {
+  try {
+    const now = new Date().toISOString();
+    // 1. Ambil status yang sudah kadaluarsa milik user ini
+    const { data: expired } = await (supabase as any)
+      .from('statuses')
+      .select('id, media_url, media_type')
+      .eq('user_id', userId)
+      .lt('expires_at', now);
+
+    if (expired && expired.length > 0) {
+      for (const status of expired) {
+        // 2. Jika ada media, hapus dari Storage
+        if (status.media_url) {
+          try {
+            const bucket = status.media_type === 'video' ? 'vidio' : 'image';
+            const urlParts = status.media_url.split('/');
+            const fileName = urlParts[urlParts.length - 1];
+            // Path biasanya {userId}/{timestamp}.{ext} berdasarkan uploadImage/Video
+            const path = `${userId}/${fileName.split('?')[0]}`;
+            await supabase.storage.from(bucket).remove([path]);
+            console.log(`Deleted storage file: ${bucket}/${path}`);
+          } catch (storageErr) {
+            console.error('Failed to delete story media from storage:', storageErr);
+          }
+        }
+        // 3. Hapus baris dari Database
+        await (supabase as any).from('statuses').delete().eq('id', status.id);
+      }
+      return true;
+    }
+  } catch (err) {
+    console.error('Error in deleteExpiredStatuses:', err);
+  }
+  return false;
 };
 
 export const getActiveStatuses = async () => {
@@ -347,6 +412,55 @@ export const voteInPoll = async (pollId: string, optionId: string, userId: strin
       .from('poll_votes')
       .insert({ poll_id: pollId, option_id: optionId, user_id: userId });
   }
+};
+
+// ─── Reactions ────────────────────────────────────────────────────────────────
+
+export const addMessageReaction = async (messageId: string, userId: string, emoji: string) => {
+  if (!emoji) {
+    // Remove individual reaction
+    return await (supabase as any)
+      .from('message_reactions')
+      .delete()
+      .eq('message_id', messageId)
+      .eq('user_id', userId);
+  }
+
+  // Explicit upsert targeting the unique constraint
+  return await (supabase as any)
+    .from('message_reactions')
+    .upsert(
+      { message_id: messageId, user_id: userId, emoji },
+      { onConflict: 'message_id,user_id' }
+    )
+    .select()
+    .single();
+};
+
+export const getMessageReactions = async (chatId: string) => {
+  // Get all reactions for messages in a specific chat
+  const { data, error } = await (supabase as any)
+    .from('message_reactions')
+    .select(`
+      *,
+      message:message_id (chat_id)
+    `)
+    .eq('message.chat_id', chatId);
+
+  return { data, error };
+};
+
+export const subscribeToReactions = (chatId: string, callback: (payload: any) => void) => {
+  // We need to filter reactions that belong to this chat
+  // Simplest is to subscribe to all and filter in callback or check if we can join
+  return supabase
+    .channel(`reactions:${chatId}`)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'message_reactions'
+    }, callback)
+    .subscribe();
 };
 
 // ─── Calls ────────────────────────────────────────────────────────────────────
@@ -466,4 +580,14 @@ export const removeFriend = async (friendshipId: string) => {
     .delete()
     .eq('id', friendshipId);
   return { error };
+};
+
+export const checkFriendship = async (user1: string, user2: string) => {
+  const { data, error } = await (supabase as any)
+    .from('friendships')
+    .select('status')
+    .or(`and(sender_id.eq.${user1},receiver_id.eq.${user2}),and(sender_id.eq.${user2},receiver_id.eq.${user1})`)
+    .eq('status', 'accepted')
+    .single();
+  return { isFriend: !!data && !error };
 };

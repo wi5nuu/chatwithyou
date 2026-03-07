@@ -10,7 +10,9 @@ import {
   Bot,
   UserCircle2,
   MessageCircle,
-  Users
+  Users,
+  Gamepad2,
+  Settings
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
@@ -23,7 +25,8 @@ import {
   getUserChats,
   createDirectChat as createChat,
   supabase,
-  getPendingRequests
+  getPendingRequests,
+  markMessagesAsDelivered
 } from '@/lib/supabase';
 import { decryptMessage, deriveSharedSecret, importPrivateKey, importPublicKey } from '@/lib/encryption';
 import { StatusBar } from '@/components/status/StatusBar';
@@ -42,11 +45,13 @@ interface ChatListProps {
   onToggleDarkMode: () => void;
   onOpenAIChat: () => void;
   onOpenProfile: () => void;
+  onOpenGames: () => void;
+  onOpenSettings: () => void;
 }
 
 export function ChatList({
   userId, userEmail, userAvatar, userDisplayName,
-  selectedChat, onSelectChat, darkMode, onToggleDarkMode, onOpenAIChat, onOpenProfile
+  selectedChat, onSelectChat, darkMode, onToggleDarkMode, onOpenAIChat, onOpenProfile, onOpenGames, onOpenSettings
 }: ChatListProps) {
   const [chats, setChats] = useState<Chat[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,8 +67,18 @@ export function ChatList({
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
+    const markAllDelivered = async () => {
+      const { data: userChats } = await getUserChats(userId);
+      if (userChats) {
+        userChats.forEach((item: any) => {
+          markMessagesAsDelivered(item.chat_id, userId);
+        });
+      }
+    };
+
     loadChats();
     loadPendingCount();
+    markAllDelivered();
 
     const channel = supabase
       .channel('chat_list_changes')
@@ -145,7 +160,10 @@ export function ChatList({
               is_group: chat.is_group || false,
               name: chat.name || null,
               avatar_url: chat.avatar_url || null,
-              participants: chat.participants?.map((p: any) => p.profile),
+              participants: chat.participants?.map((p: any) => ({
+                user_id: p.user_id,
+                profile: p.profile
+              })),
               last_message: lastMessage,
             };
           })
@@ -211,6 +229,14 @@ export function ChatList({
     if (chat.is_group) return chat.avatar_url;
     const otherParticipant = chat.participants?.find(p => p.user_id !== userId);
     return otherParticipant?.profile?.avatar_url;
+  };
+
+  const isActuallyOnline = (profile: any) => {
+    if (!profile?.online) return false;
+    if (!profile?.last_seen) return false;
+    const lastSeen = new Date(profile.last_seen).getTime();
+    const now = new Date().getTime();
+    return (now - lastSeen) < 120000;
   };
 
   const getInitials = (name: string) => {
@@ -283,6 +309,9 @@ export function ChatList({
                 <DropdownMenuItem onClick={onToggleDarkMode}>
                   Tema {darkMode ? 'Terang' : 'Gelap'}
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={onOpenSettings}>
+                  <Settings className="mr-2 h-4 w-4" /> Pengaturan
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => signOut().then(() => window.location.reload())} className="text-red-500">
                   Keluar
@@ -302,10 +331,15 @@ export function ChatList({
         </div>
       </div>
 
-      <StatusBar userId={userId} onViewStatus={(statuses) => setViewingStatuses(statuses)} />
+      <StatusBar
+        userId={userId}
+        userAvatar={userAvatar}
+        userDisplayName={userDisplayName || userEmail}
+        onViewStatus={(statuses) => setViewingStatuses(statuses)}
+      />
 
-      {/* AI Chat Button */}
-      <div className="px-3 pt-3 pb-1">
+      {/* AI & Games Buttons */}
+      <div className="px-3 pt-3 pb-1 space-y-2">
         <Button
           variant="outline"
           className="w-full justify-start gap-3 border-pink-200 dark:border-pink-800 hover:bg-pink-50 dark:hover:bg-pink-900/20 rounded-2xl"
@@ -317,6 +351,20 @@ export function ChatList({
           <div className="text-left flex-1 min-w-0">
             <p className="font-bold text-sm bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">LoveBot AI</p>
             <p className="text-[10px] text-muted-foreground truncate font-medium uppercase tracking-tight">Asisten romantis cerdas</p>
+          </div>
+        </Button>
+
+        <Button
+          variant="outline"
+          className="w-full justify-start gap-3 border-rose-200 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-2xl"
+          onClick={onOpenGames}
+        >
+          <div className="w-8 h-8 bg-gradient-to-br from-rose-400 to-red-500 rounded-full flex items-center justify-center shrink-0 shadow-sm">
+            <Gamepad2 className="w-4 h-4 text-white" />
+          </div>
+          <div className="text-left flex-1 min-w-0">
+            <p className="font-bold text-sm bg-gradient-to-r from-rose-600 to-red-600 bg-clip-text text-transparent">Pusat Game</p>
+            <p className="text-[10px] text-muted-foreground truncate font-medium uppercase tracking-tight">Seru-seruan bareng ayang</p>
           </div>
         </Button>
       </div>
@@ -361,6 +409,9 @@ export function ChatList({
                     <AvatarFallback className="bg-gradient-to-br from-pink-500 to-rose-500 text-white font-bold">
                       {getInitials(chatName)}
                     </AvatarFallback>
+                    {!chat.is_group && isActuallyOnline(chat.participants?.find(p => p.user_id !== userId)?.profile) && (
+                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full" />
+                    )}
                   </Avatar>
                   <div className="flex-1 text-left min-w-0">
                     <div className="flex justify-between items-start mb-0.5">
@@ -490,7 +541,15 @@ export function ChatList({
       {viewingStatuses && (
         <StatusViewer
           statuses={viewingStatuses}
+          userId={userId}
           onClose={() => setViewingStatuses(null)}
+          onDelete={async (statusId) => {
+            const { error } = await (supabase as any).from('statuses').delete().eq('id', statusId);
+            if (!error) {
+              setViewingStatuses(prev => prev ? prev.filter(s => s.id !== statusId) : null);
+              if (viewingStatuses?.length === 1) setViewingStatuses(null);
+            }
+          }}
         />
       )}
     </div>

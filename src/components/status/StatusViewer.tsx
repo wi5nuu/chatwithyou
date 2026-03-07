@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import type { Status } from '@/types';
 
 interface StatusViewerProps {
     statuses: Status[];
     startIndex?: number;
+    userId?: string;
     onClose: () => void;
+    onDelete?: (statusId: string) => void;
 }
 
-export function StatusViewer({ statuses, startIndex = 0, onClose }: StatusViewerProps) {
+export function StatusViewer({ statuses, startIndex = 0, userId, onClose, onDelete }: StatusViewerProps) {
     const [current, setCurrent] = useState(startIndex);
     const [progress, setProgress] = useState(0);
 
@@ -69,9 +71,20 @@ export function StatusViewer({ statuses, startIndex = 0, onClose }: StatusViewer
                         <p className="text-white font-bold text-sm">{displayName.split('@')[0]}</p>
                         <p className="text-white/60 text-xs">{formatTime(status.created_at)}</p>
                     </div>
-                    <button onClick={onClose} className="ml-auto text-white p-1 hover:bg-white/20 rounded-full transition-colors">
+                    <button onClick={onClose} className="ml-auto text-white p-1 hover:bg-white/20 rounded-full transition-colors mr-2">
                         <X className="w-5 h-5" />
                     </button>
+                    {userId === status.user_id && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (onDelete) onDelete(status.id);
+                            }}
+                            className="text-white p-1 hover:bg-white/20 rounded-full transition-colors"
+                        >
+                            <Trash2 className="w-5 h-5 text-red-400" />
+                        </button>
+                    )}
                 </div>
 
                 {/* Content */}
