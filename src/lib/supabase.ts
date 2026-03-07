@@ -188,7 +188,11 @@ export const clearChat = async (chatId: string) => {
 export const getMessages = async (chatId: string, resetAt?: string | null) => {
   let query = supabase
     .from('messages')
-    .select(`*, sender:sender_id (id, email, display_name, avatar_url, public_key, online, last_seen)`)
+    .select(`
+      *,
+      sender:sender_id (id, email, display_name, avatar_url, public_key, online, last_seen),
+      reply_to_message:reply_to_id (*, sender:sender_id (id, email, display_name, avatar_url))
+    `)
     .eq('chat_id', chatId);
 
   if (resetAt) {

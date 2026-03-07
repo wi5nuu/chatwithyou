@@ -418,15 +418,17 @@ export function ChatList({
                   onClick={() => onSelectChat(chat)}
                   className={`w-full flex items-center gap-3 p-3 transition-all hover:bg-gray-50 dark:hover:bg-gray-800/50 group animate-fade-in-up ${delayClass} ${isSelected ? 'bg-pink-50 dark:bg-pink-900/20' : ''}`}
                 >
-                  <Avatar className="w-12 h-12">
-                    <AvatarImage src={chatAvatar || undefined} />
-                    <AvatarFallback className="bg-gradient-to-br from-pink-500 to-rose-500 text-white font-bold">
-                      {getInitials(chatName)}
-                    </AvatarFallback>
+                  <div className="relative w-12 h-12 shrink-0">
+                    <Avatar className="w-12 h-12">
+                      <AvatarImage src={chatAvatar || undefined} />
+                      <AvatarFallback className="bg-gradient-to-br from-pink-500 to-rose-500 text-white font-bold">
+                        {getInitials(chatName)}
+                      </AvatarFallback>
+                    </Avatar>
                     {!chat.is_group && isActuallyOnline(chat.participants?.find(p => p.user_id !== userId)?.profile) && (
-                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full" />
+                      <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full z-10" />
                     )}
-                  </Avatar>
+                  </div>
                   <div className="flex-1 text-left min-w-0">
                     <div className="flex justify-between items-start mb-0.5">
                       <p className={`text-sm font-bold truncate ${isSelected ? 'text-pink-600 dark:text-pink-400' : ''}`}>

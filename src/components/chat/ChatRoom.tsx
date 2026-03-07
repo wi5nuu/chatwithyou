@@ -253,14 +253,27 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
             const { data: messagesData } = (await getMessages(chat.id, effectiveResetAt)) as any;
             if (messagesData) {
               const decrypted = await Promise.all(messagesData.map(async (msg: any) => {
-                // Polling data is often stored with options, don't treat as purely encrypted text if type is poll
+                // Helper to also decrypt the reply_to_message
+                const decryptReplyMsg = async (replyMsg: any) => {
+                  if (!replyMsg) return null;
+                  if (replyMsg.iv === 'plain' || !replyMsg.ciphertext) {
+                    return { ...replyMsg, decrypted_content: replyMsg.ciphertext ? decodeFallback(replyMsg.ciphertext) : '' };
+                  }
+                  try {
+                    const txt = await decryptMessage(secret, replyMsg.ciphertext, replyMsg.iv);
+                    return { ...replyMsg, decrypted_content: txt };
+                  } catch { return { ...replyMsg, decrypted_content: decodeFallback(replyMsg.ciphertext) }; }
+                };
+
                 if (msg.type === 'poll' || msg.iv === 'plain' || !msg.ciphertext) {
-                  return { ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : '' } as Message;
+                  const reply = await decryptReplyMsg(msg.reply_to_message);
+                  return { ...msg, decrypted_content: msg.ciphertext ? decodeFallback(msg.ciphertext) : '', reply_to_message: reply } as Message;
                 }
                 try {
                   const text = await decryptMessage(secret, msg.ciphertext, msg.iv);
-                  return { ...msg, decrypted_content: text } as Message;
-                } catch { return { ...msg, decrypted_content: decodeFallback(msg.ciphertext) } as Message; }
+                  const reply = await decryptReplyMsg(msg.reply_to_message);
+                  return { ...msg, decrypted_content: text, reply_to_message: reply } as Message;
+                } catch { return { ...msg, decrypted_content: decodeFallback(msg.ciphertext), reply_to_message: msg.reply_to_message } as Message; }
               }));
               setMessages(decrypted);
             }
@@ -323,7 +336,15 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
     if (!otherUser) return;
     const { error } = await sendFriendRequest(userId, otherUser.id);
     if (error) {
-      toast.error('Gagal mengirim permintaan pertemanan');
+      if (error.message === 'Sudah berteman') {
+        toast.info('Kalian sudah berteman 🎉');
+      } else if (error.message === 'Permintaan sudah dikirim') {
+        toast.info('Permintaan sudah dikirim, tunggu ya!');
+      } else if (error.message === 'User ini sudah mengirim permintaan kepadamu') {
+        toast.info('User ini sudah mengirim permintaan kepadamu! Cek di profil.');
+      } else {
+        toast.error('Gagal mengirim permintaan pertemanan: ' + error.message);
+      }
     } else {
       toast.success('Permintaan pertemanan dikirim! ✨');
       setShowNotFriendDialog(false);
@@ -848,6 +869,22 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                             ? isMediaMsg ? 'bg-transparent p-0' : 'bg-gradient-to-br from-pink-500 via-rose-500 to-rose-600 text-white rounded-br-none shadow-pink-500/20 hover:scale-[1.01]'
                             : isMediaMsg ? 'bg-transparent p-0' : 'bg-white/80 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-bl-none backdrop-blur-sm lg:hover:scale-[1.01]'
                             }`}>
+                            {/* Reply Quote */}
+                            {message.reply_to_message && (
+                              <div className={`mb-2 rounded-lg p-2 border-l-4 ${isOwn ? 'border-white/60 bg-black/10' : 'border-pink-500 bg-gray-100/80 dark:bg-gray-700/60'}`}>
+                                <p className={`text-[10px] font-bold mb-0.5 ${isOwn ? 'text-white/80' : 'text-pink-500'}`}>
+                                  {(message.reply_to_message as any).sender?.display_name || (message.reply_to_message as any).sender?.email?.split('@')[0] || 'User'}
+                                </p>
+                                <p className={`text-xs truncate ${isOwn ? 'text-white/70' : 'text-gray-500 dark:text-gray-400'}`}>
+                                  {(message.reply_to_message as any).type === 'deleted'
+                                    ? '🚫 Pesan dihapus'
+                                    : (message.reply_to_message as any).type === 'image' ? '📷 Foto'
+                                      : (message.reply_to_message as any).type === 'video' ? '📹 Video'
+                                        : (message.reply_to_message as any).type === 'voice' ? '🎤 Pesan suara'
+                                          : (message.reply_to_message as any).decrypted_content || '[Pesan]'}
+                                </p>
+                              </div>
+                            )}
                             {message.type === 'image' ? (
                               <img
                                 src={message.decrypted_content || ''}
