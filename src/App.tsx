@@ -14,6 +14,7 @@ import { GamesPage } from '@/components/games/GamesPage';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { getCurrentUser, supabase, getProfile } from '@/lib/supabase';
 import { useOnlineStatus } from '@/hooks/useRealtime';
+import { useGlobalMessageNotifications } from '@/hooks/useNotifications';
 import type { Chat, Profile } from '@/types';
 import { Heart } from 'lucide-react';
 
@@ -32,6 +33,9 @@ function App() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [activeCall, setActiveCall] = useState<any>(null);
   const [callerProfile, setCallerProfile] = useState<Profile | null>(null);
+
+  useOnlineStatus(user?.id || null);
+  useGlobalMessageNotifications(user?.id || null, selectedChat?.id || null);
 
   useEffect(() => {
     const saved = localStorage.getItem('lovechat_darkmode');

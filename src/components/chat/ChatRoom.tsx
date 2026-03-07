@@ -121,6 +121,25 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
     setOtherUser((prev: Profile | null) => prev ? { ...prev, ...updatedProfile } : updatedProfile);
   });
 
+  // Re-decrypt any messages that arrived before sharedSecret was ready
+  useEffect(() => {
+    if (!sharedSecret || messages.length === 0) return;
+    let needsUpdate = false;
+    const reDecrypt = async () => {
+      const updated = await Promise.all(messages.map(async (msg) => {
+        if (!msg.ciphertext || !msg.iv || msg.type === 'poll' || msg.iv === 'plain') return msg;
+        if (msg.decrypted_content && msg.decrypted_content.length > 0 && msg.decrypted_content !== msg.ciphertext) return msg;
+        try {
+          const text = await decryptMessage(sharedSecret, msg.ciphertext, msg.iv);
+          needsUpdate = true;
+          return { ...msg, decrypted_content: text };
+        } catch { return msg; }
+      }));
+      if (needsUpdate) setMessages(updated as Message[]);
+    };
+    reDecrypt();
+  }, [sharedSecret]);
+
   useEffect(() => {
     if (chat.id) {
       loadReactions();
