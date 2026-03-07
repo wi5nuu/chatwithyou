@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,8 +20,10 @@ import {
   getMessages, sendMessage, getOtherParticipant, uploadImage, uploadVideo,
   createPoll, markMessagesAsRead, markMessagesAsDelivered, supabase,
   addMessageReaction, clearChat, checkFriendship, sendFriendRequest,
-  updateMessage, deleteMessage
+  updateMessage, deleteMessage, getStreak, claimStreak,
+  updateLastInteraction, markStreakResetNotified
 } from '@/lib/supabase';
+import { StreakEffect } from './StreakEffect';
 import { useRealtimeMessages, useTypingIndicator, useRealtimeProfile } from '@/hooks/useRealtime';
 import { useVoiceRecorder, useVoicePlayer } from '@/hooks/useVoiceRecorder';
 import { useAI } from '@/hooks/useAI';
@@ -74,6 +76,8 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const [isFriend, setIsFriend] = useState<boolean | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [streakData, setStreakData] = useState<any>(null);
+  const [showStreakEffect, setShowStreakEffect] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -93,9 +97,83 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
     }
     setCurrentResetAt(chat.reset_at || null);
     initializeChat();
+    // Load streak data
+    const loadStreak = async () => {
+      const { data } = await getStreak(chat.id);
+      if (data) setStreakData(data);
+    };
+    loadStreak();
   }, [chat.id, userId]);
 
-  useRealtimeMessages(chat.id, (msg) => {
+  // Handle Lost Streak Notification and Idle Reminder
+  useEffect(() => {
+    if (!streakData) return;
+
+    // 1. Lost Streak Check
+    if (streakData.streak_count === 0 && streakData.is_reset_notified === false) {
+      toast.error('Api fitur dimatikan karena tidak ada komunikasi dalam sehari 😢', {
+        duration: 5000,
+        description: 'Ayo mulai chatingan lagi untuk menghidupkan api pertemanan!'
+      });
+      markStreakResetNotified(chat.id);
+    }
+
+    // 2. 10h Idle Reminder Check
+    const checkReminder = () => {
+      if (!streakData.last_interaction_at) return;
+      const lastActive = new Date(streakData.last_interaction_at).getTime();
+      const now = new Date().getTime();
+      const tenHoursInMs = 10 * 60 * 60 * 1000;
+
+      if (now - lastActive > tenHoursInMs && now - lastActive < (tenHoursInMs + 60000)) {
+        toast.info('Hidupkan kembali api anda atau efek anda agar tetap selalu komunikasi! 🔥', {
+          duration: 10000,
+        });
+      }
+    };
+
+    const interval = setInterval(checkReminder, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [streakData, chat.id]);
+
+  const decryptAndAddMessage = useCallback(async (message: any) => {
+    if (message.sender_id === userId) return;
+    const decodeFallback = (ct: string) => { try { return decodeURIComponent(escape(atob(ct))); } catch { return ct; } };
+
+    if (message.iv === 'plain' || message.type === 'poll') {
+      const text = message.ciphertext ? decodeFallback(message.ciphertext) : (message.type === 'poll' ? message.polls?.question : '');
+      const dm = { ...message, decrypted_content: text } as Message;
+      setMessages((prev: Message[]) => {
+        if (prev.find(m => m.id === message.id)) return prev;
+        return [...prev, dm];
+      });
+      if (text && message.type === 'text') { const suggestion = await suggestReply([text]); setAiSuggestion(suggestion); }
+    } else if (sharedSecret && message.ciphertext) {
+      try {
+        const text = await decryptMessage(sharedSecret, message.ciphertext, message.iv);
+        const dm = { ...message, decrypted_content: text } as Message;
+        setMessages((prev: Message[]) => {
+          if (prev.find(m => m.id === message.id)) return prev;
+          return [...prev, dm];
+        });
+        const suggestion = await suggestReply([text]);
+        setAiSuggestion(suggestion);
+      } catch {
+        const text = message.ciphertext ? decodeFallback(message.ciphertext) : '[Pesan]';
+        setMessages((prev: Message[]) => {
+          if (prev.find(m => m.id === message.id)) return prev;
+          return [...prev, { ...message, decrypted_content: text } as Message];
+        });
+      }
+    } else {
+      setMessages((prev: Message[]) => {
+        if (prev.find(m => m.id === message.id)) return prev;
+        return [...prev, { ...message } as Message];
+      });
+    }
+  }, [userId, sharedSecret, suggestReply]);
+
+  const onMessage = useCallback((msg: any) => {
     // Mark as delivered immediately when received in an active chat
     markMessagesAsDelivered(chat.id, userId);
     // Mark as read immediately if the chat room is active
@@ -105,22 +183,50 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
     if (msg.sender_id !== userId) {
       decryptAndAddMessage(msg);
     }
-  }, (updatedMsg) => {
-    setMessages((prev: Message[]) => prev.map(m => {
-      if (m.id !== updatedMsg.id) return m;
+  }, [chat.id, userId, decryptAndAddMessage]);
 
-      // Handle deleted messages
-      if (updatedMsg.type === 'deleted') {
-        return { ...m, ...updatedMsg, decrypted_content: '🚫 Pesan ini telah dihapus' };
+  const onUpdate = useCallback((updatedMsg: any) => {
+    const handleUpdate = async () => {
+      let finalMsg = { ...updatedMsg };
+
+      // If it's an edited message and we have the secret, decrypt it
+      if (updatedMsg.is_edited && updatedMsg.ciphertext && updatedMsg.iv !== 'plain' && sharedSecret) {
+        try {
+          const text = await decryptMessage(sharedSecret, updatedMsg.ciphertext, updatedMsg.iv);
+          finalMsg.decrypted_content = text;
+        } catch (e) {
+          console.error('Failed to decrypt updated message:', e);
+        }
+      } else if (updatedMsg.iv === 'plain' && updatedMsg.ciphertext) {
+        // Handle plain/base64 fallback updates
+        try {
+          finalMsg.decrypted_content = decodeURIComponent(escape(atob(updatedMsg.ciphertext)));
+        } catch {
+          finalMsg.decrypted_content = updatedMsg.ciphertext;
+        }
       }
 
-      // Handle normal updates (delivered, read, edited)
-      return { ...m, ...updatedMsg };
-    }));
-  }, (messageId) => {
+      setMessages((prev: Message[]) => prev.map(m => {
+        if (m.id !== finalMsg.id) return m;
+
+        // Handle deleted messages
+        if (finalMsg.type === 'deleted') {
+          return { ...m, ...finalMsg, decrypted_content: '🚫 Pesan ini telah dihapus' };
+        }
+
+        // Handle normal updates (delivered, read, edited)
+        return { ...m, ...finalMsg };
+      }));
+    };
+    handleUpdate();
+  }, [sharedSecret]);
+
+  const onDelete = useCallback((messageId: string) => {
     // Handle physical deletion
     setMessages((prev: Message[]) => prev.filter(m => m.id !== messageId));
-  });
+  }, []);
+
+  useRealtimeMessages(chat.id, onMessage, onUpdate, onDelete);
 
   // Keep other user's online status and profile info in sync
   useRealtimeProfile(otherUser?.id || null, (updatedProfile) => {
@@ -408,30 +514,25 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
     }
   };
 
-  const decryptAndAddMessage = async (message: any) => {
-    if (message.sender_id === userId) return;
-    const decodeFallback = (ct: string) => { try { return decodeURIComponent(escape(atob(ct))); } catch { return ct; } };
-    if (message.iv === 'plain' || !sharedSecret || message.type === 'poll') {
-      // Fallback: base64 encoded plain text or poll (polls handled specially)
-      const text = message.ciphertext ? decodeFallback(message.ciphertext) : (message.type === 'poll' ? message.polls?.question : '');
-      const dm = { ...message, decrypted_content: text } as Message;
-      setMessages((prev: Message[]) => [...prev, dm]);
-      if (text && message.type === 'text') { const suggestion = await suggestReply([text]); setAiSuggestion(suggestion); }
-    } else if (sharedSecret && message.ciphertext) {
-      try {
-        const text = await decryptMessage(sharedSecret, message.ciphertext, message.iv);
-        const dm = { ...message, decrypted_content: text } as Message;
-        setMessages((prev: Message[]) => [...prev, dm]);
-        const suggestion = await suggestReply([text]);
-        setAiSuggestion(suggestion);
-      } catch {
-        const text = message.ciphertext ? decodeFallback(message.ciphertext) : '[Pesan]';
-        setMessages((prev: Message[]) => [...prev, { ...message, decrypted_content: text } as Message]);
-      }
-    }
-  };
 
   const encodeFallback = (text: string) => btoa(unescape(encodeURIComponent(text)));
+
+  const handleClaimStreak = async () => {
+    if (!otherUser?.id) return;
+    const { data, error } = await claimStreak(chat.id, userId, otherUser.id);
+    if (error) {
+      toast.error(error.message || 'Gagal klaim streak');
+      return;
+    }
+    setStreakData(data);
+    setShowStreakEffect(true);
+    toast.success(`Streak hari ke-${data.streak_count}! 🔥 +10 Points`);
+  };
+
+  const hasClaimedToday = streakData && (
+    (streakData.user1_id === userId && streakData.user1_last_claim === new Date().toISOString().split('T')[0]) ||
+    (streakData.user2_id === userId && streakData.user2_last_claim === new Date().toISOString().split('T')[0])
+  );
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() && !editingMessage) return;
@@ -502,6 +603,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
         setNewMessage('');
         setAiSuggestion(null);
         setReplyTo(null);
+        updateLastInteraction(chat.id); // Track interaction
         setTimeout(scrollToBottom, 100);
       }
     } catch (error) { console.error('Send error:', error); setSendError('Gagal mengirim pesan'); }
@@ -518,7 +620,10 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
         payload = { chat_id: chat.id, sender_id: userId, type: 'voice', ciphertext: encodeFallback(audioBase64), iv: 'plain' };
       }
       const { data } = await sendMessage(payload);
-      if (data) setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: audioBase64 } as Message]);
+      if (data) {
+        setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: audioBase64 } as Message]);
+        updateLastInteraction(chat.id);
+      }
     } catch (error) { console.error('Voice error:', error); }
   };
 
@@ -595,6 +700,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       const { data } = await sendMessage(messagePayload);
       if (data) {
         setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: publicUrl } as Message]);
+        updateLastInteraction(chat.id);
       }
     } catch (error) { console.error('Media send error:', error); }
     finally {
@@ -643,6 +749,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
 
         if (data) {
           setMessages((prev: Message[]) => [...prev, { ...data, decrypted_content: placeholder, location: locationData } as Message]);
+          updateLastInteraction(chat.id);
         }
       } catch (error: any) {
         console.error('Error sending message:', error);
@@ -778,6 +885,22 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {!chat.is_group && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleClaimStreak}
+                className={`transition-all hover:scale-110 active:scale-95 ${hasClaimedToday ? 'text-orange-500' : 'text-gray-400'}`}
+                title={hasClaimedToday ? `Streak: ${streakData?.streak_count || 0} hari` : 'Klaim Streak Harian 🔥'}
+              >
+                <Sparkles className={`h-4 w-4 ${streakData?.streak_count >= 30 ? 'animate-pulse text-yellow-400' : ''}`} />
+                {streakData?.streak_count > 0 && (
+                  <span className="absolute -top-1 -right-1 text-[8px] bg-orange-500 text-white rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold border border-white">
+                    {streakData.streak_count}
+                  </span>
+                )}
+              </Button>
+            )}
             {!chat.is_group && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1500,6 +1623,12 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
           </DialogContent>
         </Dialog>
       </div>
+      {showStreakEffect && (
+        <StreakEffect
+          count={streakData?.streak_count || 0}
+          onComplete={() => setShowStreakEffect(false)}
+        />
+      )}
     </>
   );
 }

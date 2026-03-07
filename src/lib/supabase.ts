@@ -255,7 +255,8 @@ export const deleteMessage = async (messageId: string, forEveryone: boolean) => 
         ciphertext: '🚫 Pesan ini telah dihapus',
         iv: 'plain',
         type: 'deleted',
-        ciphertext_hash: 'deleted'
+        hash: 'deleted',
+        decrypted_content: '🚫 Pesan ini telah dihapus'
       })
       .eq('id', messageId)
       .select()
@@ -680,4 +681,133 @@ export const checkFriendship = async (user1: string, user2: string) => {
     .eq('status', 'accepted')
     .single();
   return { isFriend: !!data && !error };
+};
+
+// ─── Streaks ──────────────────────────────────────────────────────────────────
+
+export const getStreak = async (chatId: string) => {
+  const { data, error } = await (supabase as any)
+    .from('chat_streaks')
+    .select('*')
+    .eq('chat_id', chatId)
+    .maybeSingle();
+
+  if (data && !error) {
+    const s = data as any;
+    const lastActive = s.last_interaction_at ? new Date(s.last_interaction_at) : null;
+    const now = new Date();
+
+    // Check if 24h passed since last interaction
+    if (lastActive) {
+      const diffMs = now.getTime() - lastActive.getTime();
+      const twentyFourHoursInMs = 24 * 60 * 60 * 1000;
+
+      if (diffMs > twentyFourHoursInMs && s.streak_count > 0) {
+        // Streak broken! Reset to 0
+        const { data: updated } = await (supabase as any)
+          .from('chat_streaks')
+          .update({
+            streak_count: 0,
+            is_reset_notified: false // Trigger new notification
+          })
+          .eq('id', s.id)
+          .select()
+          .single();
+        return { data: updated, error: null };
+      }
+    }
+  }
+  return { data, error };
+};
+
+export const updateLastInteraction = async (chatId: string) => {
+  await (supabase as any)
+    .from('chat_streaks')
+    .update({
+      last_interaction_at: new Date().toISOString(),
+      is_reset_notified: true // Mark as not needing a "reset" notification if they are active
+    })
+    .eq('chat_id', chatId);
+};
+
+export const markStreakResetNotified = async (chatId: string) => {
+  await (supabase as any)
+    .from('chat_streaks')
+    .update({ is_reset_notified: true })
+    .eq('chat_id', chatId);
+};
+
+export const claimStreak = async (chatId: string, userId: string, otherUserId: string) => {
+  const today = new Date().toISOString().split('T')[0];
+
+  // Try to get existing streak
+  let { data: streak } = await getStreak(chatId);
+
+  if (!streak) {
+    // Create new streak record
+    const { data: newStreak, error: createError } = await (supabase as any)
+      .from('chat_streaks')
+      .insert({
+        chat_id: chatId,
+        user1_id: userId,
+        user2_id: otherUserId,
+        streak_count: 1,
+        last_streak_date: today,
+        user1_last_claim: today
+      })
+      .select()
+      .single();
+
+    if (createError) return { error: createError };
+
+    // Reward points for starting
+    await (supabase as any).rpc('increment_points', { user_id: userId, amount: 10 });
+    return { data: newStreak, error: null };
+  }
+
+  const s = streak as any;
+  const isUser1 = s.user1_id === userId;
+  const lastClaim = isUser1 ? s.user1_last_claim : s.user2_last_claim;
+
+  if (lastClaim === today) {
+    return { data: streak, error: { message: 'Sudah ambil hari ini! 🔥' } };
+  }
+
+  // Determine if streak increments
+  let newCount = s.streak_count;
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+  if (s.last_streak_date === yesterdayStr || s.last_streak_date === today) {
+    // Continuous - but we only increment count if it's a NEW day interaction
+    if (s.last_streak_date !== today) {
+      newCount += 1;
+    }
+  } else {
+    // Streak broken, reset to 1
+    newCount = 1;
+  }
+
+  const updates: any = {
+    streak_count: newCount,
+    last_streak_date: today,
+    last_interaction_at: new Date().toISOString(),
+    is_reset_notified: true
+  };
+  if (isUser1) updates.user1_last_claim = today;
+  else updates.user2_last_claim = today;
+
+  const { data, error } = await (supabase as any)
+    .from('chat_streaks')
+    .update(updates)
+    .eq('id', s.id)
+    .select()
+    .single();
+
+  if (!error) {
+    await (supabase as any).rpc('increment_points', { user_id: userId, amount: 10 });
+  }
+
+  return { data, error };
 };
