@@ -38,6 +38,7 @@ function App() {
 
   const [totalUnread, setTotalUnread] = useState(0);
 
+  // Remotely managed online status - keep only one call
   useOnlineStatus(user?.id || null);
   useGlobalMessageNotifications(user?.id || null, selectedChat?.id || null);
   useGlobalCallNotifications(user?.id || null);
@@ -146,8 +147,6 @@ function App() {
       supabase.removeChannel(channel);
     };
   }, [user]);
-
-  useOnlineStatus(user?.id);
 
   const checkAuth = async () => {
     try {
@@ -370,7 +369,12 @@ function App() {
                   onBack={() => navigate('/')}
                   isMobile={isMobile}
                 />
-              ) : <div className="h-full flex items-center justify-center">Memuat Chat...</div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center bg-white dark:bg-gray-950 p-6 text-center">
+                  <div className="w-12 h-12 border-4 border-pink-500/30 border-t-pink-500 rounded-full animate-spin mb-4" />
+                  <p className="text-sm font-bold text-gray-500">Memuat Chat...</p>
+                </div>
+              )
             } />
 
             <Route path="/movie/:id" element={
@@ -408,6 +412,7 @@ function App() {
                 </div>
               ) : null
             } />
+            <Route path="*" element={<RouteSynchronizer setSelectedChat={setSelectedChat} navigate={navigate} />} />
           </Routes>
         </div>
       )}
@@ -429,6 +434,21 @@ function App() {
       <Toaster position="top-center" richColors />
     </main>
   );
+}
+
+// Helper component to synchronize routing state
+function RouteSynchronizer({ setSelectedChat, navigate }: { setSelectedChat: (c: Chat | null) => void, navigate: any }) {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname === '/') {
+      setSelectedChat(null);
+    } else if (!location.pathname.startsWith('/chat/') && !location.pathname.startsWith('/settings') && !location.pathname.startsWith('/movie') && !location.pathname.startsWith('/games') && !location.pathname.startsWith('/profile')) {
+      navigate('/');
+    }
+  }, [location.pathname, setSelectedChat, navigate]);
+
+  return <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Pilih chat untuk memulai</div>;
 }
 
 export default App;

@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
-import type { Poll, Message } from '@/types';
+import type { Poll, Message, Chat } from '@/types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -177,6 +177,16 @@ export const createGroupChat = async (name: string, participantIds: string[], cr
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
+export const updateChat = async (chatId: string, updates: Partial<Chat>) => {
+  const { data, error } = await supabase
+    .from('chats')
+    .update(updates)
+    .eq('id', chatId)
+    .select()
+    .single();
+  return { data, error };
+};
+
 export const clearChat = async (chatId: string) => {
   const { error } = await supabase
     .from('chats')
@@ -191,7 +201,12 @@ export const getMessages = async (chatId: string, resetAt?: string | null) => {
     .select(`
       *,
       sender:sender_id (id, email, display_name, avatar_url, public_key, online, last_seen),
-      reply_to_message:reply_to_id (*, sender:sender_id (id, email, display_name, avatar_url))
+      reply_to_message:reply_to_id (*, sender:sender_id (id, email, display_name, avatar_url)),
+      poll:poll_id (
+        *,
+        options:poll_options(*),
+        votes:poll_votes(option_id)
+      )
     `)
     .eq('chat_id', chatId);
 

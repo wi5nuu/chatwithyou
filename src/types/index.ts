@@ -26,6 +26,8 @@ export interface Chat {
   unread_count?: number;
   game_level?: number;
   game_stats?: any;
+  wallpaper_url?: string | null;
+  wallpaper_color?: string | null;
 }
 
 export interface ChatParticipant {
@@ -54,6 +56,7 @@ export interface Message {
   is_delivered?: boolean;
   is_read?: boolean;
   is_edited?: boolean;
+  poll_id?: string | null;
   reply_to_id?: string | null;
   reply_to_message?: Message | null;
 }

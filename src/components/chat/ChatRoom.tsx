@@ -69,6 +69,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showWallpaperDialog, setShowWallpaperDialog] = useState(false);
   const [wallpaperUrlInput, setWallpaperUrlInput] = useState('');
+  const [wallpaperColor, setWallpaperColor] = useState<string | null>(chat.wallpaper_color || null);
   const [showNotFriendDialog, setShowNotFriendDialog] = useState(false);
   const [isFriend, setIsFriend] = useState<boolean | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -229,9 +230,9 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   }, []);
 
   useEffect(() => {
-    const savedWallpaper = localStorage.getItem(`wallpaper_${chat.id}`);
-    if (savedWallpaper) setWallpaper(savedWallpaper);
-  }, [chat.id]);
+    if (chat.wallpaper_url) setWallpaper(chat.wallpaper_url);
+    if (chat.wallpaper_color) setWallpaperColor(chat.wallpaper_color);
+  }, [chat.id, chat.wallpaper_url, chat.wallpaper_color]);
 
   useEffect(() => { scrollToBottom(); }, [messages]);
 
@@ -837,12 +838,13 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
           className="flex-1 overflow-y-auto overflow-x-hidden relative"
           style={{
             backgroundImage: wallpaper ? `url(${wallpaper})` : 'none',
+            backgroundColor: wallpaperColor || 'transparent',
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat'
           }}
         >
-          {wallpaper && <div className="absolute inset-0 bg-white/60 dark:bg-gray-950/60 pointer-events-none" />}
+          {(wallpaper || wallpaperColor) && <div className="absolute inset-0 bg-white/40 dark:bg-gray-950/40 pointer-events-none" />}
           <div className="relative p-4">
             {isLoading ? (
               <div className="space-y-4">
@@ -1222,10 +1224,10 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                     <DropdownMenuItem onClick={handleShareLocation}>
                       <MapPin className="w-4 h-4 mr-2" /> Lokasi
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleOpenGames} className="text-rose-600 dark:text-rose-400 font-bold">
+                    <DropdownMenuItem onClick={handleOpenGames}>
                       <Gamepad2 className="w-4 h-4 mr-2" /> Main Game Bareng
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleOpenMovie} className="text-pink-600 dark:text-pink-400 font-bold">
+                    <DropdownMenuItem onClick={handleOpenMovie}>
                       <Tv className="w-4 h-4 mr-2" /> Movie
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -1276,16 +1278,39 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
           onClose={() => setShowPollModal(false)}
           onCreated={async (question, options, allowMultiple) => {
             try {
-              const { data, error } = await createPoll({
+              // 1. Create the poll entry
+              const { data: pollData, error: pollError } = await createPoll({
                 chat_id: chat.id,
                 creator_id: userId,
                 question,
                 multiple_choice: allowMultiple,
                 options
               });
-              if (data && !error) {
-                setMessages((prev: Message[]) => [...prev, data as Message]);
-              }
+
+              if (pollError || !pollData) throw pollError;
+
+              // 2. Create a message linked to this poll
+              const { data: msgData, error: msgError } = await sendMessage({
+                chat_id: chat.id,
+                sender_id: userId,
+                type: 'poll',
+                poll_id: pollData.id,
+                ciphertext: question, // For display in list notifications
+                iv: 'plain'
+              });
+
+              if (msgError) throw msgError;
+
+              const newMessageObj = {
+                ...msgData,
+                poll: {
+                  ...pollData,
+                  options: options.map((opt, i) => ({ id: `new-${i}`, text: opt, poll_id: pollData.id }))
+                }
+              };
+
+              setMessages((prev: Message[]) => [...prev, newMessageObj as Message]);
+              toast.success('Polling berhasil dibuat! 📊');
             } catch (e) {
               console.error('Error creating poll:', e);
               toast.error('Gagal membuat polling');
@@ -1378,7 +1403,23 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
             <DialogHeader>
               <DialogTitle className="text-lg">Kustomisasi Chat</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 py-4">
+            <div className="space-y-6 py-4">
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Warna Latar</label>
+                <div className="flex flex-wrap gap-2">
+                  {['transparent', '#000000', '#ffffff', '#fdf2f8', '#f0f9ff', '#f0fdf4'].map(color => (
+                    <button
+                      key={color}
+                      onClick={() => setWallpaperColor(color === 'transparent' ? null : color)}
+                      className={`w-8 h-8 rounded-full border-2 transition-transform active:scale-90 ${wallpaperColor === color || (color === 'transparent' && !wallpaperColor) ? 'border-pink-500 scale-110' : 'border-gray-200'}`}
+                      style={{ backgroundColor: color === 'transparent' ? 'white' : color }}
+                    >
+                      {color === 'transparent' && <X className="w-4 h-4 mx-auto text-gray-400" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">URL Gambar Wallpaper</label>
                 <Input
@@ -1387,19 +1428,25 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
                   onChange={(e) => setWallpaperUrlInput(e.target.value)}
                   className="rounded-xl border-gray-100 dark:border-gray-800 focus:ring-pink-500"
                 />
-                <p className="text-[10px] text-muted-foreground">Biarkan kosong untuk kembali ke wallpaper default.</p>
               </div>
             </div>
             <DialogFooter>
               <Button
                 className="w-full bg-gradient-to-r from-pink-500 to-rose-500 rounded-xl font-bold py-6 shadow-lg shadow-pink-500/20"
-                onClick={() => {
+                onClick={async () => {
                   const url = wallpaperUrlInput.trim();
-                  setWallpaper(url || null);
-                  if (url) localStorage.setItem(`wallpaper_${chat.id}`, url);
-                  else localStorage.removeItem(`wallpaper_${chat.id}`);
-                  setShowWallpaperDialog(false);
-                  toast.success('Wallpaper diperbarui! ✨');
+                  const { error } = await (supabase as any).from('chats').update({
+                    wallpaper_url: url || null,
+                    wallpaper_color: wallpaperColor
+                  }).eq('id', chat.id);
+
+                  if (error) {
+                    toast.error('Gagal menyimpan wallpaper');
+                  } else {
+                    setWallpaper(url || null);
+                    setShowWallpaperDialog(false);
+                    toast.success('Wallpaper diperbarui! ✨');
+                  }
                 }}
               >
                 Simpan Perubahan

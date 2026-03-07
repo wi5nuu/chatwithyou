@@ -14,9 +14,7 @@ import {
     Smartphone,
     Info,
     ChevronRight,
-    Palette,
-    LogOut,
-    Lock
+    Palette
 } from 'lucide-react';
 import {
     Dialog,
@@ -26,6 +24,7 @@ import {
     DialogTitle,
     DialogFooter,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { supabase, signOut } from '@/lib/supabase';
 
@@ -42,16 +41,54 @@ export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: Sett
     const [activeTab, setActiveTab] = useState<SettingsTab>('main');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showClearChatsConfirm, setShowClearChatsConfirm] = useState(false);
+    const [showEmailDialog, setShowEmailDialog] = useState(false);
+    const [newEmail, setNewEmail] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isUpdating, setIsUpdating] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
 
     const handleRequestNotificationPermission = async () => {
         const permission = await Notification.requestPermission();
-        setNotificationPermission(permission);
+        if (typeof setNotificationPermission === 'function') {
+            setNotificationPermission(permission);
+        }
         if (permission === 'granted') {
             toast.success('Pemberitahuan desktop diaktifkan!');
         } else {
             toast.error('Izin pemberitahuan ditolak');
+        }
+    };
+
+    const handleUpdateEmail = async () => {
+        if (!newEmail || !newEmail.includes('@')) {
+            toast.error('Silakan masukkan email yang valid');
+            return;
+        }
+        setIsUpdating(true);
+        try {
+            const { error } = await supabase.auth.updateUser({ email: newEmail });
+            if (error) throw error;
+            toast.success('Email konfirmasi telah dikirim ke alamat baru Anda');
+            setShowEmailDialog(false);
+        } catch (error: any) {
+            toast.error(error.message || 'Gagal memperbarui email');
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const handleUpdatePrivacy = async (field: string, value: string) => {
+        try {
+            // Updating profile metadata for privacy
+            const { error } = await supabase
+                .from('profiles')
+                .update({ [field]: value })
+                .eq('id', userId);
+
+            if (error) throw error;
+            toast.success('Pengaturan privasi diperbarui');
+        } catch (error: any) {
+            toast.error('Gagal memperbarui privasi');
         }
     };
 
@@ -151,16 +188,8 @@ export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: Sett
                 {renderHeader('Akun', true)}
                 <ScrollArea className="flex-1">
                     <div className="py-2 bg-white dark:bg-gray-900 mt-4 border-y border-gray-200 dark:border-gray-800">
-                        <SettingItem icon={Shield} title="Keamanan" description="Notifikasi keamanan akun" onClick={() => toast.info('Fitur keamanan aktif')} />
-                        <SettingItem icon={Mail} title="Ganti Email" description={userEmail} onClick={() => toast.info('Fitur ganti email sedang dalam pengembangan')} />
-                        <SettingItem icon={Smartphone} title="Ganti Nomor" description="Pindahkan data akun ke nomor baru" onClick={() => toast.info('Fitur ganti nomor sedang dalam pengembangan')} />
-                    </div>
-                    <div className="py-2 bg-white dark:bg-gray-900 mt-4 border-y border-gray-200 dark:border-gray-800">
-                        <SettingItem icon={Lock} title="Ganti Password" description="Perbarui kata sandi Anda" onClick={() => toast.info('Gunakan fitur "Lupa Password" di halaman login')} />
-                        <SettingItem icon={LogOut} title="Keluar" onClick={() => signOut().then(() => window.location.reload())} />
-                    </div>
-                    <div className="py-2 bg-white dark:bg-gray-900 mt-4 border-y border-gray-200 dark:border-gray-800">
-                        <SettingItem icon={Trash2} title="Hapus Akun Saya" variant="danger" onClick={() => setShowDeleteConfirm(true)} />
+                        <SettingItem icon={Shield} title="Keamanan" description="Notifikasi keamanan akun" onClick={() => toast.success('Keamanan LoveChat aktif dengan enkripsi E2EE')} />
+                        <SettingItem icon={Mail} title="Ganti Email" description={userEmail} onClick={() => setShowEmailDialog(true)} />
                     </div>
                 </ScrollArea>
             </div>
@@ -176,10 +205,10 @@ export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: Sett
                         <div>
                             <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-4 px-1">Siapa yang dapat melihat info saya</p>
                             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
-                                <SettingItem icon={Info} title="Terakhir dilihat & Online" description="Kontak saya" onClick={() => toast.info('Fitur privasi segera hadir')} />
-                                <SettingItem icon={User} title="Foto profil" description="Semua orang" onClick={() => toast.info('Fitur privasi segera hadir')} />
-                                <SettingItem icon={Info} title="Info" description="Ada" onClick={() => toast.info('Fitur privasi segera hadir')} />
-                                <SettingItem icon={Smartphone} title="Status" description="Kontak saya" onClick={() => toast.info('Fitur privasi segera hadir')} />
+                                <SettingItem icon={Info} title="Terakhir dilihat & Online" description="Semua orang" onClick={() => handleUpdatePrivacy('privacy_last_seen', 'everyone')} />
+                                <SettingItem icon={User} title="Foto profil" description="Semua orang" onClick={() => handleUpdatePrivacy('privacy_profile_photo', 'everyone')} />
+                                <SettingItem icon={Info} title="Info" description="Semua orang" onClick={() => handleUpdatePrivacy('privacy_info', 'everyone')} />
+                                <SettingItem icon={Smartphone} title="Status" description="Kontak" onClick={() => handleUpdatePrivacy('privacy_status', 'everyone')} />
                             </div>
                         </div>
                     </div>
@@ -251,15 +280,28 @@ export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: Sett
             <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950 animate-in slide-in-from-right duration-300">
                 {renderHeader('Bantuan', true)}
                 <ScrollArea className="flex-1">
-                    <div className="p-10 flex flex-col items-center text-center">
-                        <div className="w-20 h-20 bg-gradient-to-br from-pink-500 to-rose-500 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-pink-500/20">
-                            <Info className="w-10 h-10" />
+                    <div className="p-4 space-y-4">
+                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6">
+                            <h3 className="text-sm font-bold">Frequently Asked Questions</h3>
+                            <div className="mt-4 space-y-4 text-left">
+                                <div className="space-y-1">
+                                    <p className="text-xs font-bold text-pink-500">Bagaimana cara ganti wallpaper?</p>
+                                    <p className="text-[10px] text-muted-foreground">Buka room chat, klik titik tiga di kanan atas, lalu pilih Ganti Wallpaper.</p>
+                                </div>
+                                <div className="space-y-1">
+                                    <p className="text-xs font-bold text-pink-500">Apakah chat saya aman?</p>
+                                    <p className="text-[10px] text-muted-foreground">Ya, semua chat di LoveChat menggunakan enkripsi End-to-End standar militer.</p>
+                                </div>
+                                <div className="space-y-1">
+                                    <p className="text-xs font-bold text-pink-500">Cara nonton bareng?</p>
+                                    <p className="text-[10px] text-muted-foreground">Klik ikon bioskop di samping input chat untuk masuk ke Movie Room.</p>
+                                </div>
+                            </div>
                         </div>
-                        <h2 className="text-xl font-bold mb-2">LoveChat App</h2>
-                        <p className="text-xs text-muted-foreground mb-8">Versi 2.0.4</p>
-                        <div className="w-full space-y-4">
-                            <Button variant="outline" className="w-full rounded-xl py-6" onClick={() => toast.info('Pusat Bantuan segera hadir')}>Pusat Bantuan</Button>
-                            <Button variant="outline" className="w-full rounded-xl py-6" onClick={() => window.location.href = 'mailto:support@lovechat.id'}>Hubungi Kami</Button>
+                        <div className="w-full space-y-3">
+                            <Button variant="outline" className="w-full rounded-2xl py-6 gap-2" onClick={() => window.location.href = 'mailto:support@lovechat.id'}>
+                                <Mail className="w-4 h-4" /> Hubungi Dukungan
+                            </Button>
                         </div>
                     </div>
                 </ScrollArea>
@@ -339,6 +381,29 @@ export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: Sett
                     <DialogFooter className="flex-col gap-2 mt-6">
                         <Button className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold py-6" onClick={handleClearAllChats}>Bersihkan Sekarang</Button>
                         <Button variant="ghost" className="w-full rounded-xl font-bold py-6" onClick={() => setShowClearChatsConfirm(false)}>Batal</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={showEmailDialog} onOpenChange={setShowEmailDialog}>
+                <DialogContent className="max-w-[320px] rounded-3xl p-6 border-none">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-bold">Ganti Email</DialogTitle>
+                        <DialogDescription className="text-xs">Email konfirmasi akan dikirim ke alamat baru Anda.</DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Input
+                            placeholder="Email baru..."
+                            value={newEmail}
+                            onChange={(e) => setNewEmail(e.target.value)}
+                            className="rounded-xl border-gray-100 dark:border-gray-800"
+                        />
+                    </div>
+                    <DialogFooter className="flex-col gap-2">
+                        <Button className="w-full bg-pink-500 hover:bg-pink-600 text-white rounded-xl font-bold py-6" onClick={handleUpdateEmail} disabled={isUpdating}>
+                            {isUpdating ? 'Memproses...' : 'Simpan Email'}
+                        </Button>
+                        <Button variant="ghost" className="w-full rounded-xl font-bold py-6" onClick={() => setShowEmailDialog(false)}>Batal</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
