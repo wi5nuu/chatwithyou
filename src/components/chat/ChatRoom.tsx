@@ -92,8 +92,19 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
     initializeChat();
   }, [chat.id, userId]);
 
-  useRealtimeMessages(chat.id, (msg) => decryptAndAddMessage(msg), (updatedMsg) => {
-    setMessages((prev: Message[]) => prev.map(m => m.id === updatedMsg.id ? { ...m, is_read: updatedMsg.is_read } : m));
+  useRealtimeMessages(chat.id, (msg) => {
+    // Only decrypt and add if it's not our own message (we already added our own locally)
+    if (msg.sender_id !== userId) {
+      decryptAndAddMessage(msg);
+      // Mark as delivered immediately when received in an active chat
+      markMessagesAsDelivered(chat.id, userId);
+      // Mark as read immediately if the chat room is active
+      markMessagesAsRead(chat.id, userId);
+    }
+  }, (updatedMsg) => {
+    setMessages((prev: Message[]) => prev.map(m =>
+      m.id === updatedMsg.id ? { ...m, is_delivered: updatedMsg.is_delivered, is_read: updatedMsg.is_read } : m
+    ));
   });
 
   // Keep other user's online status and profile info in sync
@@ -165,7 +176,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   };
 
   useEffect(() => {
-    if (chat.id && userId) {
+    if (chat.id && userId && messages.length > 0) {
       markMessagesAsRead(chat.id, userId);
       markMessagesAsDelivered(chat.id, userId);
     }

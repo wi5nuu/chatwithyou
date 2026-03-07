@@ -12,7 +12,9 @@ import {
   MessageCircle,
   Users,
   Gamepad2,
-  Settings
+  Settings,
+  CheckCheck,
+  Send
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
@@ -65,6 +67,7 @@ export function ChatList({
   const [friends, setFriends] = useState<any[]>([]);
   const [activeNewChatTab, setActiveNewChatTab] = useState<'search' | 'friends'>('search');
   const [pendingCount, setPendingCount] = useState(0);
+  const [totalUnread, setTotalUnread] = useState(0);
 
   useEffect(() => {
     const markAllDelivered = async () => {
@@ -87,6 +90,10 @@ export function ChatList({
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => {
         loadPendingCount();
+        loadChats(); // Also reload chats as friendship status might affect names/avatars
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, () => {
+        loadChats(); // Reload for online status updates
       })
       .subscribe();
 
@@ -129,27 +136,30 @@ export function ChatList({
             const chat = item.chats;
             const otherParticipant = chat.participants?.find((p: any) => p.user_id !== userId);
 
-            let lastMessage = null;
-            if (chat.messages && chat.messages.length > 0) {
-              const allMsgs = chat.messages;
-              const filteredMsgs = chat.reset_at
-                ? allMsgs.filter((m: any) => new Date(m.created_at) > new Date(chat.reset_at))
-                : allMsgs;
+            // Calculate unread count
+            const allMsgs = chat.messages || [];
+            const filteredMsgs = chat.reset_at
+              ? allMsgs.filter((m: any) => new Date(m.created_at) > new Date(chat.reset_at))
+              : allMsgs;
 
-              if (filteredMsgs.length > 0) {
-                lastMessage = filteredMsgs[filteredMsgs.length - 1];
-                try {
-                  const privateKeyStr = localStorage.getItem('lovechat_private_key');
-                  if (privateKeyStr && otherParticipant?.profile?.public_key) {
-                    const privateKey = await importPrivateKey(privateKeyStr);
-                    const publicKey = await importPublicKey(otherParticipant.profile.public_key);
-                    const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
-                    const decryptedContent = await decryptMessage(sharedSecret, lastMessage.ciphertext, lastMessage.iv);
-                    lastMessage.decrypted_content = decryptedContent;
-                  }
-                } catch {
-                  lastMessage.decrypted_content = lastMessage.type === 'image' ? '📷 Foto' : lastMessage.type === 'video' ? '📹 Video' : '[Encrypted]';
+            const unreadCount = filteredMsgs.filter((m: any) =>
+              m.sender_id !== userId && !m.is_read
+            ).length;
+
+            let lastMessage = null;
+            if (filteredMsgs.length > 0) {
+              lastMessage = filteredMsgs[filteredMsgs.length - 1];
+              try {
+                const privateKeyStr = localStorage.getItem('lovechat_private_key');
+                if (privateKeyStr && otherParticipant?.profile?.public_key) {
+                  const privateKey = await importPrivateKey(privateKeyStr);
+                  const publicKey = await importPublicKey(otherParticipant.profile.public_key);
+                  const sharedSecret = await deriveSharedSecret(privateKey, publicKey);
+                  const decryptedContent = await decryptMessage(sharedSecret, lastMessage.ciphertext, lastMessage.iv);
+                  lastMessage.decrypted_content = decryptedContent;
                 }
+              } catch {
+                lastMessage.decrypted_content = lastMessage.type === 'image' ? '📷 Foto' : lastMessage.type === 'video' ? '📹 Video' : '[Encrypted]';
               }
             }
 
@@ -165,9 +175,13 @@ export function ChatList({
                 profile: p.profile
               })),
               last_message: lastMessage,
+              unread_count: unreadCount
             };
           })
         );
+        const total = transformedChats.reduce((acc, c) => acc + (c.unread_count || 0), 0);
+        setTotalUnread(total);
+
         setChats(transformedChats.sort((a, b) => {
           const timeA = a.last_message ? new Date(a.last_message.created_at).getTime() : new Date(a.created_at).getTime();
           const timeB = b.last_message ? new Date(b.last_message.created_at).getTime() : new Date(b.created_at).getTime();
@@ -278,9 +292,9 @@ export function ChatList({
                 {getInitials(userDisplayName || userEmail)}
               </AvatarFallback>
             </Avatar>
-            {pendingCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-900 animate-in zoom-in duration-300">
-                {pendingCount}
+            {(pendingCount > 0 || totalUnread > 0) && (
+              <span className={`absolute -top-1 -right-1 w-5 h-5 ${totalUnread > 0 ? 'bg-pink-500' : 'bg-red-500'} text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-gray-900 animate-in zoom-in duration-300`}>
+                {totalUnread > 0 ? totalUnread : pendingCount}
               </span>
             )}
           </button>
@@ -418,15 +432,34 @@ export function ChatList({
                       <p className={`text-sm font-bold truncate ${isSelected ? 'text-pink-600 dark:text-pink-400' : ''}`}>
                         {chatName}
                       </p>
-                      {chat.last_message && (
-                        <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
-                          {formatTime(chat.last_message.created_at)}
-                        </span>
-                      )}
                     </div>
-                    <p className="text-xs text-muted-foreground truncate font-medium">
-                      {getLastMsgPreview(chat)}
-                    </p>
+                    <div className="flex justify-between items-end">
+                      <p className="text-xs text-muted-foreground truncate font-medium flex-1">
+                        {getLastMsgPreview(chat)}
+                      </p>
+                      <div className="flex flex-col items-end gap-1 ml-2">
+                        {chat.last_message && (
+                          <span className={`text-[10px] whitespace-nowrap ${chat.unread_count && chat.unread_count > 0 ? 'text-pink-500 font-bold' : 'text-muted-foreground'}`}>
+                            {formatTime(chat.last_message.created_at)}
+                          </span>
+                        )}
+                        {chat.unread_count && chat.unread_count > 0 ? (
+                          <div className="min-w-[18px] h-[18px] px-1 bg-gradient-to-br from-pink-500 to-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-in zoom-in duration-300 shadow-sm shadow-pink-500/20">
+                            {chat.unread_count}
+                          </div>
+                        ) : chat.last_message && chat.last_message.sender_id === userId && (
+                          <div className="flex items-center">
+                            {chat.last_message.is_read ? (
+                              <CheckCheck className="w-3 h-3 text-pink-500" />
+                            ) : chat.last_message.is_delivered ? (
+                              <CheckCheck className="w-3 h-3 text-blue-400" />
+                            ) : (
+                              <Send className="w-2.5 h-2.5 text-gray-400" />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   {isSelected && <div className="absolute left-0 top-3 bottom-3 w-1 bg-pink-500 rounded-r-full" />}
                 </button>
@@ -531,27 +564,31 @@ export function ChatList({
       </div>
 
       {/* Modals */}
-      {showGroupModal && (
-        <CreateGroupModal
-          userId={userId}
-          onClose={() => setShowGroupModal(false)}
-          onCreated={loadChats}
-        />
-      )}
-      {viewingStatuses && (
-        <StatusViewer
-          statuses={viewingStatuses}
-          userId={userId}
-          onClose={() => setViewingStatuses(null)}
-          onDelete={async (statusId) => {
-            const { error } = await (supabase as any).from('statuses').delete().eq('id', statusId);
-            if (!error) {
-              setViewingStatuses(prev => prev ? prev.filter(s => s.id !== statusId) : null);
-              if (viewingStatuses?.length === 1) setViewingStatuses(null);
-            }
-          }}
-        />
-      )}
+      {
+        showGroupModal && (
+          <CreateGroupModal
+            userId={userId}
+            onClose={() => setShowGroupModal(false)}
+            onCreated={loadChats}
+          />
+        )
+      }
+      {
+        viewingStatuses && (
+          <StatusViewer
+            statuses={viewingStatuses!}
+            userId={userId}
+            onClose={() => setViewingStatuses(null)}
+            onDelete={async (statusId) => {
+              const { error } = await (supabase as any).from('statuses').delete().eq('id', statusId);
+              if (!error) {
+                setViewingStatuses(prev => prev ? prev.filter(s => s.id !== statusId) : null);
+                if (viewingStatuses?.length === 1) setViewingStatuses(null);
+              }
+            }}
+          />
+        )
+      }
     </div>
   );
 }

@@ -141,7 +141,7 @@ export const getUserChats = async (userId: string) => {
           user_id,
           profile:user_id (id, email, display_name, avatar_url, public_key, online, last_seen)
         ),
-        messages (id, type, ciphertext, iv, hash, created_at, sender_id)
+        messages (id, type, ciphertext, iv, hash, created_at, sender_id, is_delivered, is_read)
       )
     `)
     .eq('user_id', userId);
@@ -531,6 +531,18 @@ export const subscribeToProfile = (userId: string, callback: (payload: any) => v
 // ─── Friendships ─────────────────────────────────────────────────────────────
 
 export const sendFriendRequest = async (senderId: string, receiverId: string) => {
+  // Check if request already exists in either direction
+  const { data: existing } = await (supabase as any)
+    .from('friendships')
+    .select('id, status')
+    .or(`and(sender_id.eq.${senderId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${senderId})`)
+    .maybeSingle();
+
+  if (existing) {
+    if (existing.status === 'accepted') return { data: existing, error: { message: 'Sudah berteman' } };
+    return { data: existing, error: { message: 'Permintaan sudah ada' } };
+  }
+
   const { data, error } = await (supabase as any)
     .from('friendships')
     .insert({ sender_id: senderId, receiver_id: receiverId, status: 'pending' })
