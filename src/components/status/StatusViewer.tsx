@@ -20,7 +20,7 @@ export function StatusViewer({ statuses, startIndex = 0, userId, onClose, onDele
     const status = statuses[current];
     const DURATION = 5000;
 
-    const rafRef = useRef<number>();
+    const rafRef = useRef<number>(undefined);
 
     useEffect(() => {
         const start = Date.now();

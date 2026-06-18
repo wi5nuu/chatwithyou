@@ -92,7 +92,10 @@ export function useGlobalMessageNotifications(
                     // Skip if we're already in this chat room (messages shown inline)
                     if (msg.chat_id === currentChatId && document.visibilityState === 'visible') return;
 
-                    // Get sender profile
+                    let senderName = 'Seseorang';
+                    let avatarUrl: string | undefined;
+                    let preview = '📨 Pesan baru';
+
                     try {
                         const { data: profile } = await (supabase as any)
                             .from('profiles')
@@ -101,18 +104,15 @@ export function useGlobalMessageNotifications(
                             .single();
 
                         const p = profile as any;
-                        const senderName = p?.display_name || p?.email?.split('@')[0] || 'Seseorang';
-                        const avatarUrl = p?.avatar_url;
+                        senderName = p?.display_name || p?.email?.split('@')[0] || 'Seseorang';
+                        avatarUrl = p?.avatar_url;
 
-                        // Determine message preview text
-                        let preview = '📨 Pesan baru';
                         if (msg.type === 'image') preview = '📷 Mengirim foto';
                         else if (msg.type === 'video') preview = '📹 Mengirim video';
                         else if (msg.type === 'voice') preview = '🎤 Pesan suara';
                         else if (msg.type === 'poll') preview = '📊 Membuat polling';
                         else if (msg.type === 'location') preview = '📍 Berbagi lokasi';
                         else if (msg.iv === 'plain' && msg.ciphertext) {
-                            // Plain text — decode fallback
                             try { preview = decodeURIComponent(escape(atob(msg.ciphertext))); } catch { /* noop */ }
                         } else {
                             preview = '🔒 Pesan terenkripsi';
