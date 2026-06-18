@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Mail, Lock, User } from 'lucide-react';
 import { signUp, createProfile } from '@/lib/supabase';
-import { generateKeyPair, exportPublicKey } from '@/lib/encryption';
+import { generateKeyPair, exportPublicKey, storeKeys } from '@/lib/encryption';
 
 interface SignupFormProps {
   onSuccess: () => void;
@@ -51,11 +51,7 @@ export function SignupForm({ onSuccess, onToggleMode }: SignupFormProps) {
         const keyPair = await generateKeyPair();
         const publicKeyStr = await exportPublicKey(keyPair.publicKey);
 
-        // Store private key locally
-        const privateKeyStr = await window.crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
-        const privateKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(privateKeyStr)));
-        localStorage.setItem('lovechat_private_key', privateKeyBase64);
-        localStorage.setItem('lovechat_public_key', publicKeyStr);
+        storeKeys(keyPair);
 
         // Create profile
         const { error: profileError } = await createProfile(data.user.id, email, publicKeyStr);

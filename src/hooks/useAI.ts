@@ -115,7 +115,7 @@ export function useAI(): UseAIReturn {
       if (positiveScore > negativeScore) return 'positive';
       if (negativeScore > positiveScore) return 'negative';
       return 'neutral';
-    } catch (err) {
+    } catch {
       return 'neutral';
     }
   }, []);

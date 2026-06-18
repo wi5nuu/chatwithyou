@@ -228,3 +228,26 @@
     height: env(safe-area-inset-bottom);
   }
 }
+
+/* Scroll Snap and Utility Extensions */
+@layer utilities {
+  .snap-y-mandatory {
+    scroll-snap-type: y mandatory;
+  }
+
+  .snap-start {
+    scroll-snap-align: start;
+  }
+
+  .snap-always {
+    scroll-snap-stop: always;
+  }
+
+  .h-dvh {
+    height: 100dvh;
+  }
+
+  .min-h-dvh {
+    min-height: 100dvh;
+  }
+}

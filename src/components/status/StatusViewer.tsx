@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, ChevronRight, Trash2, Eye } from 'lucide-react';
 import { trackStatusView, getStatusViews } from '@/lib/supabase';
 import type { Status } from '@/types';
@@ -20,36 +20,45 @@ export function StatusViewer({ statuses, startIndex = 0, userId, onClose, onDele
     const status = statuses[current];
     const DURATION = 5000;
 
+    const rafRef = useRef<number>();
+
     useEffect(() => {
-        setProgress(0);
         const start = Date.now();
-        const interval = setInterval(() => {
+        let isCancelled = false;
+
+        const animate = () => {
+            if (isCancelled) return;
             const elapsed = Date.now() - start;
             const pct = Math.min((elapsed / DURATION) * 100, 100);
             setProgress(pct);
             if (pct >= 100) {
-                clearInterval(interval);
                 if (current < statuses.length - 1) {
                     setCurrent(c => c + 1);
                 } else {
                     onClose();
                 }
+            } else {
+                rafRef.current = requestAnimationFrame(animate);
             }
-        }, 50);
+        };
 
-        // Track view
+        setProgress(0);
+        rafRef.current = requestAnimationFrame(animate);
+
         if (userId && status?.id) {
             trackStatusView(status.id, userId);
         }
 
-        // Fetch viewers if owner
         if (userId === status?.user_id) {
             getStatusViews(status.id).then(({ data }: { data: any }) => {
                 if (data) setViewers(data);
             });
         }
 
-        return () => clearInterval(interval);
+        return () => {
+            isCancelled = true;
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        };
     }, [current, statuses.length, userId, status?.id, status?.user_id]);
 
     if (!status) return null;

@@ -107,8 +107,8 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
     const handleSignOut = async () => {
         try {
             await signOut();
-        } catch (err) {
-            console.error('SignOut error:', err);
+        } catch {
+            // Sign out locally even if API fails
         } finally {
             onSignOut();
         }
@@ -121,7 +121,6 @@ export function ProfilePage({ userId, userEmail, darkMode, onToggleDarkMode, onB
     const [isSearchingFriend, setIsSearchingFriend] = useState(false);
 
     useEffect(() => {
-        loadProfile();
         if (activeTab === 'friends') {
             loadFriendsData();
         }

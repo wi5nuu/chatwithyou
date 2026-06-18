@@ -119,8 +119,8 @@ export function useGlobalMessageNotifications(
                         }
 
                         showMessageNotification(senderName, preview, msg.chat_id, avatarUrl);
-                    } catch (e) {
-                        showMessageNotification('Seseorang', '📨 Pesan baru', msg.chat_id);
+                    } catch {
+                        showMessageNotification(senderName, preview, msg.chat_id, avatarUrl);
                     }
                 }
             )

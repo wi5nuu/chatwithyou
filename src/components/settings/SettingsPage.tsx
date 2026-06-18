@@ -49,9 +49,7 @@ export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: Sett
 
     const handleRequestNotificationPermission = async () => {
         const permission = await Notification.requestPermission();
-        if (typeof setNotificationPermission === 'function') {
-            setNotificationPermission(permission);
-        }
+        setNotificationPermission(permission);
         if (permission === 'granted') {
             toast.success('Pemberitahuan desktop diaktifkan!');
         } else {
@@ -87,7 +85,7 @@ export function SettingsPage({ userId, userEmail, onBack, deferredPrompt }: Sett
 
             if (error) throw error;
             toast.success('Pengaturan privasi diperbarui');
-        } catch (error: any) {
+        } catch {
             toast.error('Gagal memperbarui privasi');
         }
     };

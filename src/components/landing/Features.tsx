@@ -41,36 +41,31 @@ const features = [
 
 export function Features() {
     return (
-        <section id="features" className="py-16 relative overflow-hidden bg-gray-50/50 dark:bg-gray-900/30">
+        <section id="features" className="h-dvh relative overflow-hidden bg-gray-50/50 dark:bg-gray-900/30 flex items-center justify-center">
             <div className="absolute top-0 right-0 w-96 h-96 bg-rose-100/30 dark:bg-rose-900/10 rounded-full blur-[80px] translate-x-1/2 -translate-y-1/2"></div>
 
             <div className="container max-w-5xl mx-auto px-4 relative z-10">
-                <div className="text-center mb-12">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-card text-rose-600 dark:text-rose-400 text-xs font-bold mb-4 luxury-shadow uppercase tracking-widest">
-                        <Heart className="w-4 h-4" />
+                <div className="text-center mb-10">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-card text-rose-600 dark:text-rose-400 text-[10px] font-bold mb-4 luxury-shadow uppercase tracking-widest">
+                        <Heart className="w-3.5 h-3.5" />
                         <span>Fitur Tanpa Batas</span>
                     </div>
-                    <h2 className="text-2xl md:text-4xl font-black mb-4 text-gray-900 dark:text-white leading-tight">
+                    <h2 className="text-3xl md:text-5xl font-black mb-4 text-gray-900 dark:text-white leading-tight">
                         Kemewahan Dalam <span className="gradient-text">Setiap Sentuhan.</span>
                     </h2>
-                    <p className="text-muted-foreground text-base max-w-2xl mx-auto leading-relaxed">
-                        Kami menghadirkan fitur-fitur tercanggih yang dibalut antarmuka menawan untuk mendukung romansa digital Anda.
-                    </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                     {features.map((feature, index) => (
                         <div
                             key={index}
-                            className="group p-6 rounded-3xl glass-card luxury-shadow hover:bg-white/90 dark:hover:bg-black/60 transition-all hover:-translate-y-2 relative overflow-hidden"
+                            className="group p-5 md:p-6 rounded-3xl glass-card luxury-shadow hover:bg-white/90 dark:hover:bg-black/60 transition-all hover:-translate-y-1 relative overflow-hidden"
                         >
-                            <div className="absolute -top-8 -right-8 w-24 h-24 bg-gradient-to-br from-white/10 to-transparent rounded-full group-hover:scale-150 transition-transform"></div>
-
-                            <div className={`${feature.color} w-14 h-14 rounded-2xl flex items-center justify-center text-white mb-5 group-hover:scale-110 transition-transform shadow-md`}>
+                            <div className={`${feature.color} w-10 h-10 md:w-12 md:h-12 rounded-2xl flex items-center justify-center text-white mb-4 group-hover:scale-110 transition-transform shadow-md`}>
                                 {feature.icon}
                             </div>
-                            <h3 className="text-lg font-black mb-2 text-gray-900 dark:text-white group-hover:text-rose-500 transition-colors uppercase tracking-tight">{feature.title}</h3>
-                            <p className="text-muted-foreground text-sm leading-relaxed">{feature.description}</p>
+                            <h3 className="text-sm md:text-base font-black mb-1.5 text-gray-900 dark:text-white group-hover:text-rose-500 transition-colors uppercase tracking-tight">{feature.title}</h3>
+                            <p className="text-muted-foreground text-[10px] md:text-xs leading-relaxed line-clamp-2 md:line-clamp-none">{feature.description}</p>
                         </div>
                     ))}
                 </div>

@@ -43,7 +43,7 @@ export function useRealtimeMessages(
         supabase.removeChannel(channelRef.current);
       }
     };
-  }, [chatId, onMessage]);
+  }, [chatId, onMessage, onUpdate, onDelete]);
 }
 
 export function useRealtimeCalls(
@@ -157,9 +157,25 @@ export function useOnlineStatus(userId: string | null) {
     // Set online when component mounts
     updateOnlineStatus(true);
 
-    // Set offline when window closes
+    // Set offline when window closes (use keepalive fetch for reliability)
     const handleBeforeUnload = () => {
-      updateOnlineStatus(false);
+      try {
+        fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ online: false, last_seen: new Date().toISOString() }),
+            keepalive: true,
+          }
+        );
+      } catch {
+        // Fire-and-forget, no error handling needed
+      }
     };
 
     // Heartbeat to keep online status

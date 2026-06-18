@@ -39,26 +39,18 @@ export function MovieRoom({ chat, userId, onBack }: MovieRoomProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const channelRef = useRef<any>(null);
 
-    useEffect(() => {
-        loadMessages();
-        setupRealtime();
-        loadYouTubeAPI();
+    const broadcastVideoState = (state: number, time: number) => {
+        if (channelRef.current) {
+            channelRef.current.send({
+                type: 'broadcast',
+                event: 'video_state',
+                payload: { state, time, videoId: selectedMovie.id, userId }
+            });
+        }
+    };
 
-        return () => {
-            if (channelRef.current) supabase.removeChannel(channelRef.current);
-        };
-    }, [chat.id]);
-
-    const loadYouTubeAPI = () => {
-        if ((window as any).YT) return;
-        const tag = document.createElement('script');
-        tag.src = "https://www.youtube.com/iframe_api";
-        const firstScriptTag = document.getElementsByTagName('script')[0];
-        firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-
-        (window as any).onYouTubeIframeAPIReady = () => {
-            createPlayer(MOVIES[0].id);
-        };
+    const onPlayerStateChange = (event: any) => {
+        broadcastVideoState(event.data, playerRef.current?.getCurrentTime() || 0);
     };
 
     const createPlayer = (videoId: string) => {
@@ -78,22 +70,29 @@ export function MovieRoom({ chat, userId, onBack }: MovieRoomProps) {
         });
     };
 
-    const onPlayerStateChange = (event: any) => {
-        // 1 = playing, 2 = paused
+    const loadYouTubeAPI = () => {
+        if ((window as any).YT) return;
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
 
-        // Broadcast state change if triggered by local user interaction
-        // Note: Simple debounce or flag might be needed to avoid loops
-        broadcastVideoState(event.data, playerRef.current?.getCurrentTime() || 0);
+        (window as any).onYouTubeIframeAPIReady = () => {
+            createPlayer(MOVIES[0].id);
+        };
     };
 
-    const broadcastVideoState = (state: number, time: number) => {
-        if (channelRef.current) {
-            channelRef.current.send({
-                type: 'broadcast',
-                event: 'video_state',
-                payload: { state, time, videoId: selectedMovie.id, userId }
-            });
-        }
+    const loadMessages = async () => {
+        const { data } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('chat_id', chat.id)
+            .eq('type', 'movie_chat')
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+        if (data) setMessages(data.reverse() as Message[]);
+        scrollToBottom();
     };
 
     const setupRealtime = () => {
@@ -108,7 +107,6 @@ export function MovieRoom({ chat, userId, onBack }: MovieRoomProps) {
                 }
 
                 if (playerRef.current) {
-                    // Sync time if difference is > 2 seconds
                     const diff = Math.abs(playerRef.current.getCurrentTime() - payload.time);
                     if (diff > 2) {
                         playerRef.current.seekTo(payload.time, true);
@@ -133,18 +131,15 @@ export function MovieRoom({ chat, userId, onBack }: MovieRoomProps) {
         channelRef.current = channel;
     };
 
-    const loadMessages = async () => {
-        const { data } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('chat_id', chat.id)
-            .eq('type', 'movie_chat')
-            .order('created_at', { ascending: false })
-            .limit(50);
+    useEffect(() => {
+        loadMessages();
+        setupRealtime();
+        loadYouTubeAPI();
 
-        if (data) setMessages(data.reverse() as Message[]);
-        scrollToBottom();
-    };
+        return () => {
+            if (channelRef.current) supabase.removeChannel(channelRef.current);
+        };
+    }, [chat.id]);
 
     const handleSendMessage = async () => {
         if (!newMessage.trim()) return;

@@ -27,14 +27,85 @@ export function useWebRTC({ chatId, userId, callType, onCallEnd }: UseWebRTCProp
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const callChannelRef = useRef<any>(null);
 
-  // Initialize peer connection
-  const createPeerConnection = useCallback(() => {
+  const iceCandidateChannelRef = useRef<any>(null);
+
+  // ─── End call (defined first since other callbacks depend on it) ───────────
+  const endCall = useCallback(async () => {
+    if (currentCall) {
+      await supabase
+        .from('calls')
+        .update({ status: 'ended' })
+        .eq('id', currentCall.id);
+    }
+
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+    }
+
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+    }
+
+    if (callChannelRef.current) {
+      supabase.removeChannel(callChannelRef.current);
+    }
+
+    if (iceCandidateChannelRef.current) {
+      supabase.removeChannel(iceCandidateChannelRef.current);
+    }
+
+    setLocalStream(null);
+    setRemoteStream(null);
+    setIsCallActive(false);
+    setIsRinging(false);
+    setCurrentCall(null);
+    peerConnectionRef.current = null;
+    callChannelRef.current = null;
+    iceCandidateChannelRef.current = null;
+
+    onCallEnd?.();
+  }, [currentCall, localStream, onCallEnd]);
+
+  // ─── ICE Candidate helpers ──────────────────────────────────────────────────
+  const subscribeToIceCandidates = useCallback((callId: string, pc: RTCPeerConnection) => {
+    const channel = supabase
+      .channel(`call_candidates:${callId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'call_candidates',
+        filter: `call_id=eq.${callId}`,
+      }, (payload) => {
+        const candidate = payload.new as any;
+        if (candidate.user_id !== userId && candidate.candidate) {
+          try {
+            pc.addIceCandidate(new RTCIceCandidate(candidate.candidate));
+          } catch (e) {
+            console.error('Error adding ICE candidate:', e);
+          }
+        }
+      })
+      .subscribe();
+    iceCandidateChannelRef.current = channel;
+  }, [userId]);
+
+  const sendIceCandidate = useCallback(async (callId: string, candidate: RTCIceCandidateInit) => {
+    await supabase
+      .from('call_candidates')
+      .insert({
+        call_id: callId,
+        user_id: userId,
+        candidate: candidate as any,
+      });
+  }, [userId]);
+
+  // ─── Peer connection ────────────────────────────────────────────────────────
+  const createPeerConnection = useCallback((callId?: string) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
-    
+
     pc.onicecandidate = async (event) => {
-      if (event.candidate && currentCall) {
-        // Send ICE candidate through signaling
-        // In a full implementation, we'd have a separate table for ICE candidates
+      if (event.candidate && callId) {
+        await sendIceCandidate(callId, event.candidate.toJSON());
       }
     };
 
@@ -49,36 +120,22 @@ export function useWebRTC({ chatId, userId, callType, onCallEnd }: UseWebRTCProp
     };
 
     return pc;
-  }, [currentCall]);
+  }, [sendIceCandidate, endCall]);
 
-  // Start a call
+  // ─── Start a call ────────────────────────────────────────────────────────────
   const startCall = useCallback(async () => {
     try {
       setCallError(null);
-      
-      // Get local media
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: callType === 'video',
       });
-      
+
       setLocalStream(stream);
       setIsRinging(true);
 
-      // Create peer connection
-      const pc = createPeerConnection();
-      peerConnectionRef.current = pc;
-
-      // Add local tracks
-      stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream);
-      });
-
-      // Create offer
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      // Create call in database
+      const offer = await new RTCPeerConnection(ICE_SERVERS).createOffer();
       const { data: callData, error } = await supabase
         .from('calls')
         .insert({
@@ -92,7 +149,7 @@ export function useWebRTC({ chatId, userId, callType, onCallEnd }: UseWebRTCProp
         .single();
 
       if (error) throw error;
-      
+
       const newCall: Call = {
         id: callData.id,
         chat_id: callData.chat_id,
@@ -103,36 +160,48 @@ export function useWebRTC({ chatId, userId, callType, onCallEnd }: UseWebRTCProp
         type: callData.type as any,
         created_at: callData.created_at,
       };
-      
+
       setCurrentCall(newCall);
 
-      // Subscribe to call updates
+      const pc = createPeerConnection(callData.id);
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach((track) => {
+        pc.addTrack(track, stream);
+      });
+
+      const actualOffer = await pc.createOffer();
+      await pc.setLocalDescription(actualOffer);
+
+      await supabase
+        .from('calls')
+        .update({ offer: actualOffer as any })
+        .eq('id', callData.id);
+
+      subscribeToIceCandidates(callData.id, pc);
+
       const channel = supabase
         .channel(`call:${callData.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'calls',
-            filter: `id=eq.${callData.id}`,
-          },
-          async (payload) => {
-            const updatedCall = payload.new as Call;
-            
-            if (updatedCall.status === 'connected' && updatedCall.answer) {
-              // Call answered
-              setIsRinging(false);
-              setIsCallActive(true);
-              
-              // Set remote description
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'calls',
+          filter: `id=eq.${callData.id}`,
+        }, async (payload) => {
+          const updatedCall = payload.new as Call;
+
+          if (updatedCall.status === 'connected' && updatedCall.answer) {
+            setIsRinging(false);
+            setIsCallActive(true);
+            try {
               await pc.setRemoteDescription(new RTCSessionDescription(updatedCall.answer));
-            } else if (updatedCall.status === 'ended' || updatedCall.status === 'declined') {
-              // Call ended
-              endCall();
+            } catch (e) {
+              console.error('Error setting remote description:', e);
             }
+          } else if (updatedCall.status === 'ended' || updatedCall.status === 'declined') {
+            endCall();
           }
-        )
+        })
         .subscribe();
 
       callChannelRef.current = channel;
@@ -142,41 +211,35 @@ export function useWebRTC({ chatId, userId, callType, onCallEnd }: UseWebRTCProp
       setCallError(error.message);
       endCall();
     }
-  }, [chatId, userId, callType, createPeerConnection]);
+  }, [chatId, userId, callType, createPeerConnection, subscribeToIceCandidates, endCall]);
 
-  // Answer a call
+  // ─── Answer a call ────────────────────────────────────────────────────────────
   const answerCall = useCallback(async (call: Call) => {
     try {
       setCallError(null);
       setCurrentCall(call);
 
-      // Get local media
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: call.type === 'video',
       });
-      
+
       setLocalStream(stream);
 
-      // Create peer connection
-      const pc = createPeerConnection();
+      const pc = createPeerConnection(call.id);
       peerConnectionRef.current = pc;
 
-      // Add local tracks
       stream.getTracks().forEach((track) => {
         pc.addTrack(track, stream);
       });
 
-      // Set remote description (offer)
       if (call.offer) {
         await pc.setRemoteDescription(new RTCSessionDescription(call.offer));
       }
 
-      // Create answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      // Update call with answer
       await supabase
         .from('calls')
         .update({
@@ -187,25 +250,21 @@ export function useWebRTC({ chatId, userId, callType, onCallEnd }: UseWebRTCProp
 
       setIsCallActive(true);
 
-      // Subscribe to call updates
+      subscribeToIceCandidates(call.id, pc);
+
       supabase
         .channel(`call:${call.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'calls',
-            filter: `id=eq.${call.id}`,
-          },
-          async (payload) => {
-            const updatedCall = payload.new as Call;
-            
-            if (updatedCall.status === 'ended') {
-              endCall();
-            }
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'calls',
+          filter: `id=eq.${call.id}`,
+        }, async (payload) => {
+          const updatedCall = payload.new as Call;
+          if (updatedCall.status === 'ended') {
+            endCall();
           }
-        )
+        })
         .subscribe();
 
     } catch (error: any) {
@@ -213,58 +272,20 @@ export function useWebRTC({ chatId, userId, callType, onCallEnd }: UseWebRTCProp
       setCallError(error.message);
       endCall();
     }
-  }, [createPeerConnection]);
+  }, [createPeerConnection, subscribeToIceCandidates, endCall]);
 
-  // Decline a call
+  // ─── Decline a call ───────────────────────────────────────────────────────────
   const declineCall = useCallback(async (callId: string) => {
     try {
       await supabase
         .from('calls')
         .update({ status: 'declined' })
         .eq('id', callId);
-      
       endCall();
     } catch (error) {
       console.error('Error declining call:', error);
     }
-  }, []);
-
-  // End call
-  const endCall = useCallback(async () => {
-    // Update call status
-    if (currentCall) {
-      await supabase
-        .from('calls')
-        .update({ status: 'ended' })
-        .eq('id', currentCall.id);
-    }
-
-    // Stop local stream
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-    }
-
-    // Close peer connection
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-    }
-
-    // Unsubscribe from call channel
-    if (callChannelRef.current) {
-      supabase.removeChannel(callChannelRef.current);
-    }
-
-    // Reset state
-    setLocalStream(null);
-    setRemoteStream(null);
-    setIsCallActive(false);
-    setIsRinging(false);
-    setCurrentCall(null);
-    peerConnectionRef.current = null;
-    callChannelRef.current = null;
-
-    onCallEnd?.();
-  }, [currentCall, localStream, onCallEnd]);
+  }, [endCall]);
 
   // Listen for incoming calls
   useEffect(() => {

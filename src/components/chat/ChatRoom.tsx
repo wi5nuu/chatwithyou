@@ -109,7 +109,6 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
   useEffect(() => {
     if (!streakData) return;
 
-    // 1. Lost Streak Check
     if (streakData.streak_count === 0 && streakData.is_reset_notified === false) {
       toast.error('Api fitur dimatikan karena tidak ada komunikasi dalam sehari 😢', {
         duration: 5000,
@@ -117,10 +116,12 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       });
       markStreakResetNotified(chat.id);
     }
+  }, [streakData?.streak_count, streakData?.is_reset_notified, chat.id]);
 
-    // 2. 10h Idle Reminder Check
+  useEffect(() => {
+    if (!streakData?.last_interaction_at) return;
+
     const checkReminder = () => {
-      if (!streakData.last_interaction_at) return;
       const lastActive = new Date(streakData.last_interaction_at).getTime();
       const now = new Date().getTime();
       const tenHoursInMs = 10 * 60 * 60 * 1000;
@@ -132,9 +133,9 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
       }
     };
 
-    const interval = setInterval(checkReminder, 60000); // Check every minute
+    const interval = setInterval(checkReminder, 60000);
     return () => clearInterval(interval);
-  }, [streakData, chat.id]);
+  }, [streakData?.last_interaction_at, chat.id]);
 
   const decryptAndAddMessage = useCallback(async (message: any) => {
     if (message.sender_id === userId) return;
@@ -755,13 +756,7 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
         console.error('Error sending message:', error);
         toast.error('Gagal mengirim pesan: ' + (error.message || 'Unknown error'));
         setSendError(error.message);
-      } finally { /* This finally block is empty and seems misplaced based on the original structure.
-                  * The original structure had the geolocation error handler as the second argument to getCurrentPosition.
-                  * Assuming the user intended to replace the sendMessage catch block and keep the geolocation error handler separate.
-                  * The line `e.error('Geolocation error:', error);` is likely a typo for `console.error`.
-                  * I will correct the typo and keep the geolocation error handler as it was,
-                  * and apply the new catch block to the sendMessage try/catch.
-                  */ }
+      }
     }, (error) => {
       console.error('Geolocation error:', error);
       alert('Gagal mendapatkan lokasi. Pastikan izin lokasi aktif.');
@@ -1634,18 +1629,19 @@ export function ChatRoom({ chat, userId, onBack, isMobile }: ChatRoomProps) {
 }
 
 function LinkPreview({ url }: { url: string }) {
+  let domain: string;
   try {
-    const domain = new URL(url).hostname;
-    return (
-      <div className="bg-black/5 dark:bg-white/5 rounded-lg p-2 mb-1 border-l-4 border-pink-500 cursor-pointer" onClick={() => window.open(url, '_blank')}>
-        <div className="flex items-center gap-2 mb-1">
-          <ExternalLink className="w-3 h-3 text-pink-500" />
-          <span className="text-[10px] font-bold text-pink-500 uppercase tracking-tighter">{domain}</span>
-        </div>
-        <p className="text-[11px] font-medium line-clamp-1 opacity-80">{url}</p>
-      </div>
-    );
-  } catch (e) {
+    domain = new URL(url).hostname;
+  } catch {
     return null;
   }
+  return (
+    <div className="bg-black/5 dark:bg-white/5 rounded-lg p-2 mb-1 border-l-4 border-pink-500 cursor-pointer" onClick={() => window.open(url, '_blank')}>
+      <div className="flex items-center gap-2 mb-1">
+        <ExternalLink className="w-3 h-3 text-pink-500" />
+        <span className="text-[10px] font-bold text-pink-500 uppercase tracking-tighter">{domain}</span>
+      </div>
+      <p className="text-[11px] font-medium line-clamp-1 opacity-80">{url}</p>
+    </div>
+  );
 }
