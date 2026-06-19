@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { config } from '@/lib/config';
 
 interface UseAIReturn {
   isProcessing: boolean;
@@ -9,8 +10,7 @@ interface UseAIReturn {
 }
 
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY;
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+const API_URL = config.gemini.apiUrl;
 
 export function useAI(): UseAIReturn {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -20,7 +20,7 @@ export function useAI(): UseAIReturn {
     message: string,
     context: string[] = []
   ): Promise<string> => {
-    if (!GEMINI_API_KEY) {
+    if (!config.gemini.apiKey) {
       console.warn('Gemini API Key missing, using local fallback...');
       await new Promise(resolve => setTimeout(resolve, 1000));
       return "Maaf, aku sedang tidak bisa berpikir jernih. Coba lagi nanti ya sayang! ❤️";

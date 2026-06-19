@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { config } from '@/lib/config';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export function useRealtimeMessages(
@@ -157,25 +158,20 @@ export function useOnlineStatus(userId: string | null) {
     // Set online when component mounts
     updateOnlineStatus(true);
 
-    // Set offline when window closes (use keepalive fetch for reliability)
+    // Set offline when window closes
     const handleBeforeUnload = () => {
-      try {
-        fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify({ online: false, last_seen: new Date().toISOString() }),
-            keepalive: true,
-          }
-        );
-      } catch {
-        // Fire-and-forget, no error handling needed
-      }
+      fetch(
+        `${config.supabase.url}/rest/v1/profiles?id=eq.${userId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': config.supabase.anonKey,
+          },
+          body: JSON.stringify({ online: false, last_seen: new Date().toISOString() }),
+          keepalive: true,
+        }
+      );
     };
 
     // Heartbeat to keep online status
